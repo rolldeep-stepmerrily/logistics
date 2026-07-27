@@ -1,9 +1,11 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { JwtModule } from '@nestjs/jwt';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import Joi from 'joi';
+import type ms from 'ms';
 
 import { GlobalCqrsModule } from './common/cqrs';
 import { KafkaModule } from './common/kafka';
@@ -44,6 +46,14 @@ import { WarehouseModule } from './warehouse/warehouse.module';
       isGlobal: true,
       envFilePath: '.env',
       validationOptions: { abortEarly: true },
+    }),
+    JwtModule.registerAsync({
+      global: true,
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        secret: configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
+        signOptions: { expiresIn: configService.getOrThrow<string>('JWT_ACCESS_EXPIRES_IN') as ms.StringValue },
+      }),
     }),
     GlobalCqrsModule,
     PrismaModule,
