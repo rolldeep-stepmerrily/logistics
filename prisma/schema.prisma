@@ -1,0 +1,217 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id        Int       @id @default(autoincrement())
+  email     String    @unique
+  name      String
+  password  String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime? @updatedAt
+  deletedAt DateTime?
+
+  shipments     Shipment[]
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("refresh_tokens")
+}
+
+model Warehouse {
+  id        Int           @id @default(autoincrement())
+  code      String        @unique
+  name      String
+  type      WarehouseType
+  address   String
+  latitude  Decimal       @db.Decimal(9, 6)
+  longitude Decimal       @db.Decimal(9, 6)
+  capacity  Int
+  createdAt DateTime      @default(now())
+  updatedAt DateTime?     @updatedAt
+
+  drivers          Driver[]
+  originShipments  Shipment[] @relation("ShipmentOrigin")
+  destShipments    Shipment[] @relation("ShipmentDestination")
+  currentShipments Shipment[] @relation("ShipmentCurrentHub")
+
+  @@map("warehouses")
+}
+
+model Driver {
+  id                 Int          @id @default(autoincrement())
+  name               String
+  phone              String       @unique
+  vehicleType        VehicleType
+  status             DriverStatus @default(OFFLINE)
+  currentWarehouseId Int?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime?    @updatedAt
+
+  currentWarehouse Warehouse?           @relation(fields: [currentWarehouseId], references: [id])
+  assignments      DriverAssignment[]
+
+  @@index([status, currentWarehouseId])
+  @@map("drivers")
+}
+
+model Shipment {
+  id             Int            @id @default(autoincrement())
+  trackingNumber String         @unique
+  senderId       Int
+  status         ShipmentStatus @default(CREATED)
+
+  recipientName  String
+  recipientPhone String
+  recipientAddr  String
+
+  originHubId      Int
+  destinationHubId Int
+  currentHubId     Int?
+
+  weightG        Int
+  declaredValue  Int?
+  failureReason  String?
+  deliveryProof  String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime? @updatedAt
+
+  sender         User               @relation(fields: [senderId], references: [id])
+  originHub      Warehouse          @relation("ShipmentOrigin", fields: [originHubId], references: [id])
+  destinationHub Warehouse          @relation("ShipmentDestination", fields: [destinationHubId], references: [id])
+  currentHub     Warehouse?         @relation("ShipmentCurrentHub", fields: [currentHubId], references: [id])
+  events         ShipmentEvent[]
+  routePlan      RoutePlan?
+  assignments    DriverAssignment[]
+
+  @@index([status])
+  @@index([senderId, createdAt])
+  @@map("shipments")
+}
+
+model ShipmentEvent {
+  id         Int             @id @default(autoincrement())
+  shipmentId Int
+  fromStatus ShipmentStatus?
+  toStatus   ShipmentStatus
+  eventType  String
+  payload    Json?
+  actorType  ActorType
+  actorId    String?
+  occurredAt DateTime        @default(now())
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id])
+
+  @@index([shipmentId, occurredAt])
+  @@map("shipment_events")
+}
+
+model RoutePlan {
+  id              Int      @id @default(autoincrement())
+  shipmentId      Int      @unique
+  hops            Json
+  currentHopIndex Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime? @updatedAt
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id])
+
+  @@map("route_plans")
+}
+
+model DriverAssignment {
+  id         Int              @id @default(autoincrement())
+  shipmentId Int
+  driverId   Int
+  purpose    AssignmentPurpose
+  status     AssignmentStatus @default(ACTIVE)
+  assignedAt DateTime         @default(now())
+  releasedAt DateTime?
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id])
+  driver   Driver   @relation(fields: [driverId], references: [id])
+
+  @@index([driverId, status])
+  @@index([shipmentId, status])
+  @@map("driver_assignments")
+}
+
+model OutboxEvent {
+  id          Int       @id @default(autoincrement())
+  aggregateId String
+  eventType   String
+  payload     Json
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([publishedAt])
+  @@map("outbox_events")
+}
+
+enum WarehouseType {
+  ORIGIN
+  HUB
+  LOCAL
+}
+
+enum VehicleType {
+  BIKE
+  CAR
+  TRUCK
+}
+
+enum DriverStatus {
+  OFFLINE
+  AVAILABLE
+  BUSY
+}
+
+enum ShipmentStatus {
+  CREATED
+  READY_FOR_PICKUP
+  PICKED_UP
+  AT_ORIGIN_HUB
+  IN_TRANSIT
+  AT_HUB
+  OUT_FOR_DELIVERY
+  DELIVERED
+  DELIVERY_FAILED
+  RETURNED
+  CANCELLED
+}
+
+enum ActorType {
+  SYSTEM
+  DRIVER
+  ADMIN
+  SENDER
+}
+
+enum AssignmentPurpose {
+  PICKUP
+  LINE_HAUL
+  LAST_MILE
+}
+
+enum AssignmentStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}

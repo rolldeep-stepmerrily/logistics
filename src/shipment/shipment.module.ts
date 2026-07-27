@@ -1,0 +1,39 @@
+import { JwtGuard } from '@@guards';
+import { Module } from '@nestjs/common';
+
+import { CreateShipmentCommandHandler } from './application/commands/create-shipment.command';
+import { PlanRouteCommandHandler } from './application/commands/plan-route.command';
+import { TransitionShipmentCommandHandler } from './application/commands/transition-shipment.command';
+import { GetShipmentEventsQueryHandler } from './application/queries/get-shipment-events.query';
+import { GetShipmentQueryHandler } from './application/queries/get-shipment.query';
+import { CreateShipmentUseCase } from './application/use-cases/create-shipment.use-case';
+import { GetShipmentEventsUseCase } from './application/use-cases/get-shipment-events.use-case';
+import { GetShipmentUseCase } from './application/use-cases/get-shipment.use-case';
+import { PlanRouteUseCase } from './application/use-cases/plan-route.use-case';
+import { TransitionShipmentUseCase } from './application/use-cases/transition-shipment.use-case';
+import { ShipmentHttpController } from './presenter/http/shipment.http.controller';
+
+@Module({
+  controllers: [ShipmentHttpController],
+  providers: [
+    /** query-handlers */
+    GetShipmentQueryHandler,
+    GetShipmentEventsQueryHandler,
+
+    /** command-handlers */
+    CreateShipmentCommandHandler,
+    TransitionShipmentCommandHandler,
+    PlanRouteCommandHandler,
+
+    /** use-cases */
+    CreateShipmentUseCase,
+    GetShipmentUseCase,
+    GetShipmentEventsUseCase,
+    TransitionShipmentUseCase,
+    PlanRouteUseCase,
+
+    /** infrastructure */
+    JwtGuard,
+  ],
+})
+export class ShipmentModule {}
