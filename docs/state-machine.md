@@ -29,7 +29,10 @@
 9. [고급 패턴 B — invoke + fromPromise (외부 API 를 머신 안에서)](#9-고급-패턴-b--invoke--frompromise-외부-api-를-머신-안에서)
 10. [고급 패턴 C — Outbox 패턴 (상태 전이 → Kafka)](#10-고급-패턴-c--outbox-패턴-상태-전이--kafka)
 11. [고급 패턴 D — Stately Inspect (dev 시각화)](#11-고급-패턴-d--stately-inspect-dev-시각화)
-12. [한눈 정리](#12-한눈-정리)
+12. [고급 패턴 E — Nested (Compound) States](#12-고급-패턴-e--nested-compound-states)
+13. [고급 패턴 F — Entry / Exit Actions](#13-고급-패턴-f--entry--exit-actions)
+14. [고급 패턴 G — `after` (Delayed Transitions) + Cron 스캐너 패턴](#14-고급-패턴-g--after-delayed-transitions--cron-스캐너-패턴)
+15. [한눈 정리](#15-한눈-정리)
 
 ---
 
@@ -957,7 +960,283 @@ pnpm dev
 
 ---
 
-## 12. 한눈 정리
+## 12. 고급 패턴 E — Nested (Compound) States
+
+### 문제 상황
+
+`OUT_FOR_DELIVERY` 하나로 뭉뚱그리기엔 실제로 여러 하위 단계가 있다:
+- 기사가 이동 중 (`EN_ROUTE`)
+- 문 앞 도착, 초인종 눌렀는데 응답 대기 (`AT_DOOR`)
+
+이걸 flat 하게 풀면 `OUT_FOR_DELIVERY_EN_ROUTE`, `OUT_FOR_DELIVERY_AT_DOOR` 상태가 늘어난다. 그럼 부모 레벨 이벤트 (`DELIVER`, `FAIL_DELIVERY`, `CANCEL`) 를 두 상태 모두에 복붙해야 함.
+
+### 해법: Compound state — 상태 안에 상태
+
+`shipment.machine.ts:168~212`
+
+```ts
+OUT_FOR_DELIVERY: {
+  entry: { type: 'markDeliveryStart' },
+  exit:  { type: 'clearDeliveryTimers' },
+  initial: 'EN_ROUTE',                    // ← 진입 시 초기 sub-state
+  on: {
+    // 부모 레벨 이벤트 — 모든 sub-state 에서 유효 (한 번만 선언)
+    DELIVER:          { guard: 'isPaid', target: 'DELIVERED' },
+    FAIL_DELIVERY:    { target: 'DELIVERY_FAILED', actions: { type: 'incrementFailure' } },
+    TIMEOUT_DELIVERY: { target: 'DELIVERY_FAILED', actions: { type: 'incrementFailure' } },
+  },
+  states: {
+    EN_ROUTE: {
+      on: { ARRIVE_AT_DOOR: { target: 'AT_DOOR' } },   // ← sub-state 사이 이동
+    },
+    AT_DOOR: {
+      entry: { type: 'markArrivedAtDoor' },            // ← sub-state entry action
+      after: { 900000: { target: '#deliveryFailed', ... } },  // 14장 참고
+    },
+  },
+},
+```
+
+### snapshot.value 의 shape
+
+Flat 이면 string, compound 면 object:
+
+```ts
+// EN_ROUTE 일 때:
+snapshot.value = { delivery: { OUT_FOR_DELIVERY: 'EN_ROUTE' }, payment: 'PAID' }
+
+// AT_DOOR 일 때:
+snapshot.value = { delivery: { OUT_FOR_DELIVERY: 'AT_DOOR' }, payment: 'PAID' }
+
+// 그 외 flat 상태 (IN_TRANSIT 등):
+snapshot.value = { delivery: 'IN_TRANSIT', payment: 'PAID' }
+```
+
+DB 는 flat enum 컬럼 (`status` + `deliveryPhase`) 두 개로 나눠 저장. Util 이 두 shape 사이 변환.
+
+`shipment-machine.util.ts:41~59`
+
+```ts
+const buildDeliveryValue = (delivery, phase) => {
+  if (delivery === 'OUT_FOR_DELIVERY') {
+    return { OUT_FOR_DELIVERY: phase ?? 'EN_ROUTE' };
+  }
+  return delivery;
+};
+
+const parseDeliveryValue = (value) => {
+  if (typeof value === 'string') return { delivery: value, phase: null };
+  return { delivery: 'OUT_FOR_DELIVERY', phase: value.OUT_FOR_DELIVERY };
+};
+```
+
+### 이벤트 처리 규칙
+
+부모/자식이 같은 이벤트 이름을 다루면 **가장 안쪽 (deepest) 상태의 핸들러가 우선**. 예: `AT_DOOR` 에서 `CANCEL` 을 정의하고 `OUT_FOR_DELIVERY` 에서도 `CANCEL` 을 정의하면 `AT_DOOR` 것이 이긴다. 자식에 없으면 부모로 위임됨.
+
+이 프로젝트는 자식 상태 (`EN_ROUTE`, `AT_DOOR`) 가 각자 자기만의 이벤트 (`ARRIVE_AT_DOOR`) 만 다루고, 종료 이벤트 (`DELIVER`, `FAIL_DELIVERY`) 는 부모가 처리 → 중복 없음.
+
+### Parallel vs Nested — 언제 뭘 쓰나
+
+| 상황 | 선택 |
+|---|---|
+| 독립적으로 흐르는 여러 lifecycle | **parallel** (`delivery + payment`) |
+| 한 lifecycle 안의 단계적 세분화 | **nested** (`OUT_FOR_DELIVERY.EN_ROUTE / AT_DOOR`) |
+| 둘 다 필요 | 함께 사용 — 이 프로젝트가 그 예시 |
+
+---
+
+## 13. 고급 패턴 F — Entry / Exit Actions
+
+### 개념 차이
+
+지금까지 본 action 은 **transition 에 붙어있음**: 특정 이벤트로 특정 target 으로 갈 때만 실행.
+Entry / Exit action 은 **state 에 붙어있음**: 어떤 경로로 진입/이탈하든 무조건 실행.
+
+```ts
+transitions: {
+  DELIVER: { target: 'DELIVERED', actions: [{ type: 'foo' }] }  // DELIVER 시에만
+  FAIL_DELIVERY: { target: 'DELIVERY_FAILED', actions: [{ type: 'foo' }] }  // FAIL 시에만
+}
+// vs
+DELIVERY_FAILED: {
+  entry: { type: 'foo' }  // 어떤 이벤트로 DELIVERY_FAILED 에 들어와도 실행
+}
+```
+
+### 실전 예시 — SLA 타임스탬프 자동 관리
+
+`shipment.machine.ts:169~212`
+
+```ts
+OUT_FOR_DELIVERY: {
+  entry: { type: 'markDeliveryStart' },   // ← 이 상태로 들어오면 시작 시각 기록
+  exit:  { type: 'clearDeliveryTimers' }, // ← 이 상태에서 나가면 (성공/실패 무관) 타이머 정리
+  // ...
+  states: {
+    AT_DOOR: {
+      entry: { type: 'markArrivedAtDoor' },  // ← 문 앞 도착 시각 기록 (after timeout 기준점)
+    },
+  },
+},
+
+// actions:
+markDeliveryStart:  assign({ deliveryStartedAt: () => new Date() }),
+clearDeliveryTimers: assign({ deliveryStartedAt: () => null, arrivedAtDoorAt: () => null }),
+markArrivedAtDoor:  assign({ arrivedAtDoorAt: () => new Date() }),
+```
+
+**얻는 것**:
+- `DISPATCH_LAST_MILE` 로 `OUT_FOR_DELIVERY` 진입해도, 나중에 재시도로 (`RETRY_DELIVERY`) 진입해도 → 두 경우 모두 `deliveryStartedAt` 자동 갱신
+- 모든 종료 경로 (`DELIVER`, `FAIL_DELIVERY`, `TIMEOUT_DELIVERY`, `CANCEL`) 에서 자동 cleanup — 개별 transition 에 넣을 필요 없음
+
+### 발화 순서 (중요)
+
+**진입 시**: `parent.entry → child.entry` 순 (겉에서 안으로)
+**이탈 시**: `child.exit → parent.exit` 순 (안에서 밖으로)
+**전이 순서**: `source.exit → transition.actions → target.entry`
+
+예: `EN_ROUTE → AT_DOOR` 전이 시
+1. `EN_ROUTE` 는 exit action 없음 → skip
+2. transition 자체의 action 없음 → skip
+3. `AT_DOOR.entry: markArrivedAtDoor` 실행
+
+예: `AT_DOOR → DELIVERY_FAILED` (TIMEOUT_DELIVERY) 전이 시
+1. `AT_DOOR.exit` 없음 → skip
+2. `OUT_FOR_DELIVERY.exit: clearDeliveryTimers` 실행 (부모 이탈)
+3. transition action `incrementFailure` 실행
+4. `DELIVERY_FAILED.entry` 없음 → skip
+
+### Entry/Exit vs Transition action — 언제 뭘 쓰나
+
+| 케이스 | 선택 |
+|---|---|
+| 특정 이벤트에만 반응 | **transition action** (예: `CONFIRM_PAYMENT → recordPayment`) |
+| 진입 경로 여러 개, 모두 동일 동작 | **entry** (예: `markDeliveryStart`) |
+| 이탈 시 항상 cleanup 필요 | **exit** (예: `clearDeliveryTimers`) |
+| context 초기화 / 리셋 | 대개 **entry** |
+
+### ⚠️ Snapshot 복원 시 entry 재실행되지 않음
+
+`resolveShipmentSnapshot` 으로 저장된 상태 복원 시, entry action 은 **재실행되지 않는다**. Entry 는 "transition 을 통해 상태로 들어올 때" 만 fire. 복원은 "이미 그 상태에 있는 것으로 세팅" 이라 fire 안 함.
+
+→ Entry action 결과는 반드시 context 나 DB 에 persist 해야 함 (transient 하면 안 됨).
+
+---
+
+## 14. 고급 패턴 G — `after` (Delayed Transitions) + Cron 스캐너 패턴
+
+### XState `after` 문법
+
+특정 상태에 진입한 뒤 N ms 가 지나면 자동으로 target 으로 전이.
+
+`shipment.machine.ts:199~206`
+
+```ts
+AT_DOOR: {
+  entry: { type: 'markArrivedAtDoor' },
+  after: {
+    900000: {                             // ← 15분 (ms)
+      target: '#deliveryFailed',          // ← ID 기반 참조 (parallel + nested 라 절대경로 안전)
+      actions: { type: 'incrementFailure' },
+    },
+  },
+},
+```
+
+여기서 `#deliveryFailed` 는 `DELIVERY_FAILED: { id: 'deliveryFailed', ... }` 에 부여한 ID. Parallel 리전 (`delivery`) 안, compound (`OUT_FOR_DELIVERY.AT_DOOR`) 안에서 sibling 상태를 참조하려면 ID 방식이 제일 확실함.
+
+### ⚠️ 문제 — 이 프로젝트에선 `after` 가 실제로 fire 되지 않는다
+
+XState 의 `after` timer 는 **actor 가 살아있는 동안에만** 돈다. 우리 `runTransition` 은 매 요청마다:
+
+```ts
+const actor = createActor(shipmentMachine, ...);
+actor.start();
+actor.send(event);
+const next = actor.getSnapshot();
+actor.stop();          // ← 스냅샷만 뽑고 즉시 stop
+```
+
+Timer 는 세팅되자마자 actor 가 stop 되면서 사라진다. Actor lifetime 이 request-scoped 이면 `after` 는 essentially 데코레이션.
+
+### 해법: Cron 스캐너로 `after` 의미를 재현
+
+**Machine 은 `after` 를 선언 (도메인 의도 문서화 + Inspector 시각화용)**,
+**실제 timer 는 별도 Cron 이 DB 를 scan 해서 이벤트 dispatch 로 구현.**
+
+`src/shipment/application/schedulers/delivery-timeout.service.ts:37~74`
+
+```ts
+@Injectable()
+export class DeliveryTimeoutService {
+  @Cron(CronExpression.EVERY_MINUTE)
+  async scanExpiredAtDoor(): Promise<void> {
+    const threshold = new Date(Date.now() - AT_DOOR_TIMEOUT_MS);   // 15min
+    const expired = await this.prisma.shipment.findMany({
+      where: {
+        status: 'OUT_FOR_DELIVERY',
+        deliveryPhase: 'AT_DOOR',
+        arrivedAtDoorAt: { lt: threshold },
+      },
+    });
+
+    for (const s of expired) {
+      await this.commandBus.execute(
+        new TransitionShipmentCommand({
+          shipmentId: s.id,
+          event: { type: 'TIMEOUT_DELIVERY' },       // ← 머신에 이벤트 dispatch
+          actorType: ActorType.SYSTEM,
+          actorId: 'delivery-timeout-scheduler',
+        }),
+      );
+    }
+  }
+}
+```
+
+Machine 은 별도 `TIMEOUT_DELIVERY` 이벤트로 같은 target 을 가진다:
+
+```ts
+OUT_FOR_DELIVERY: {
+  on: {
+    TIMEOUT_DELIVERY: { target: 'DELIVERY_FAILED', actions: {type:'incrementFailure'} },
+    FAIL_DELIVERY:    { target: 'DELIVERY_FAILED', actions: {type:'incrementFailure'} },
+  },
+}
+```
+
+`buildSideEffects` 에서 timeout 인 경우 `failureReason = 'NO_RESPONSE_TIMEOUT'` 도 자동 세팅.
+
+### 원자성 / idempotency
+
+- Transition 은 트랜잭션 안에서 `deliveryPhase` 를 다른 값으로 옮기므로 다음 tick 에서 다시 잡히지 않음
+- 만에 하나 concurrent tick 이 같은 shipment 를 두 번 dispatch → 두 번째는 `INVALID_TRANSITION` 예외로 안전하게 실패
+- 즉 스캐너는 idempotent 하게 동작
+
+### 이 패턴을 다른 케이스에 적용
+
+- "결제 pending 이 24h 지나면 자동 만료" → payment 서브머신에 `after: { 86400000: 'FAILED' }` + Cron
+- "READY_FOR_PICKUP 이 48h 지나면 자동 CANCEL" → 같은 패턴
+- 공통 규칙: **선언은 machine 에, 실제 dispatch 는 Cron 에**. 두 곳이 나뉜 것 같아도 (a) machine 이 canonical source of truth 유지, (b) 프로덕션 timer 는 DB 기반이라 재기동에 강함
+
+### 순수 XState `after` 가 fire 되게 하려면
+
+Actor 를 오래 살려야 함:
+
+```ts
+// 이런 구조에서는 실제로 fire 됨:
+const actor = createActor(shipmentMachine);
+actor.start();
+setInterval(() => saveSnapshotToDb(actor.getSnapshot()), 1000);
+// actor.stop() 을 안 함 (프로세스 lifetime 동안 살아있음)
+```
+
+인메모리 orchestrator, WebSocket 서버, 게임 세션 등에서는 이렇게 씀. 배송 도메인처럼 request-scoped 서비스는 Cron 방식이 정답.
+
+---
+
+## 15. 한눈 정리
 
 ### 기초 개념
 
@@ -978,13 +1257,18 @@ pnpm dev
 |---|---|---|
 | **parallel state** | 독립적으로 진행되는 lifecycle 이 여러 개 | delivery + payment 두 서브머신 동시 실행 |
 | **stateIn (cross-substate guard)** | 서브머신 간 조율 | `DELIVER` 은 `payment=PAID` 일 때만 |
+| **nested (compound)** | 한 상태 안의 여러 단계 | `OUT_FOR_DELIVERY.EN_ROUTE / AT_DOOR` |
+| **entry / exit actions** | 진입/이탈 경로 여러 개, 공통 처리 필요 | `markDeliveryStart` / `clearDeliveryTimers` |
+| **after (declarative timer)** | "N ms 후 자동 전이" 를 문서화 | `AT_DOOR` 15분 후 `#deliveryFailed` |
+| **Cron 스캐너 패턴** | Request-scoped actor 에서 `after` 대체 | `DeliveryTimeoutService` @ EVERY_MINUTE |
 | **invoke + fromPromise** | 비동기 부수효과를 머신 안에서 | routing API 호출을 `planning → planned/failed` 상태로 |
 | **Outbox 패턴** | 상태 전이를 안전하게 외부 발행 | DB 트랜잭션 + outbox row → Cron publisher → Kafka |
 | **Stately Inspect** | dev 환경 시각화 | `XSTATE_INSPECT=true` 로 실시간 스냅샷 스트리밍 |
 
-### 지켜야 할 4가지 원칙
+### 지켜야 할 5가지 원칙
 
 1. **머신은 pure** — DB, Kafka, HTTP 모른다. context/guard/action 만.
 2. **부수효과는 command 트랜잭션 안에서** — status 업데이트 + 이력 append + outbox 를 한 커밋에.
-3. **`shipment.status` / `paymentStatus` 는 오직 `TransitionShipmentCommand` 를 통해서만 바꾼다** — 다른 경로 금지.
+3. **`shipment.status` / `paymentStatus` / `deliveryPhase` 는 오직 `TransitionShipmentCommand` 를 통해서만 바꾼다** — 다른 경로 금지.
 4. **외부 발행은 outbox 를 통해서만** — DB 커밋 후 Kafka 직접 발행 금지 (이중 쓰기 위험).
+5. **`after` 는 machine 에 선언 + Cron 이 실제 dispatch** — request-scoped actor 에서는 timer 가 안 fire 됨을 잊지 말 것.

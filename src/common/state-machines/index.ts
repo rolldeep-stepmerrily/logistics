@@ -8,7 +8,9 @@ export {
   runRoutePlanning,
 } from './routing';
 export {
+  type ShipmentDeliveryPhase,
   type ShipmentDeliveryState,
+  type ShipmentDeliveryValue,
   type ShipmentEventInput,
   type ShipmentMachineContext,
   type ShipmentMachineState,

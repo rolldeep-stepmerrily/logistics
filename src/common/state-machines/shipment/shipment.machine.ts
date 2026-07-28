@@ -16,11 +16,27 @@ export type ShipmentDeliveryState =
 export type ShipmentPaymentState = 'PENDING' | 'PAID' | 'REFUNDED';
 
 /**
+ * OUT_FOR_DELIVERY 의 nested sub-state.
+ * status = 'OUT_FOR_DELIVERY' 일 때만 의미 있음. 그 외 상태에서는 null.
+ */
+export type ShipmentDeliveryPhase = 'EN_ROUTE' | 'AT_DOOR';
+
+/**
+ * Delivery 서브머신의 snapshot value.
+ * OUT_FOR_DELIVERY 는 compound state 라 object shape 이 됨: `{ OUT_FOR_DELIVERY: 'EN_ROUTE' }`.
+ * 나머지 flat state 는 string.
+ */
+export type ShipmentDeliveryValue =
+  | Exclude<ShipmentDeliveryState, 'OUT_FOR_DELIVERY'>
+  // biome-ignore lint/style/useNamingConvention: XState state ID 와 일치해야 함
+  | { OUT_FOR_DELIVERY: ShipmentDeliveryPhase };
+
+/**
  * parallel machine 의 최상위 value 는 sub-state 이름을 키로 갖는 object.
  * shipmentMachine 의 snapshot.value 는 이 shape 을 갖는다.
  */
 export interface ShipmentMachineValue {
-  delivery: ShipmentDeliveryState;
+  delivery: ShipmentDeliveryValue;
   payment: ShipmentPaymentState;
 }
 
@@ -36,6 +52,9 @@ export interface ShipmentMachineContext {
   failureCount: number;
   maxRetries: number;
   paidAmount: number | null;
+  // Entry/Exit action 이 갱신하는 SLA 타임스탬프
+  deliveryStartedAt: Date | null;
+  arrivedAtDoorAt: Date | null;
 }
 
 export type ShipmentEventInput =
@@ -52,7 +71,9 @@ export type ShipmentEventInput =
   | { type: 'RETURN' }
   | { type: 'CANCEL' }
   | { type: 'CONFIRM_PAYMENT'; amount: number }
-  | { type: 'REFUND_PAYMENT' };
+  | { type: 'REFUND_PAYMENT' }
+  | { type: 'ARRIVE_AT_DOOR' }
+  | { type: 'TIMEOUT_DELIVERY' };
 
 /**
  * Shipment lifecycle state machine — parallel state 로 delivery + payment 를 동시에 트래킹.
@@ -98,6 +119,15 @@ export const shipmentMachine = setup({
         return null;
       },
     }),
+    // Entry action on OUT_FOR_DELIVERY 진입 시 배송 시작 타임스탬프 기록
+    markDeliveryStart: assign({ deliveryStartedAt: () => new Date() }),
+    // Exit action on OUT_FOR_DELIVERY 이탈 시 (성공/실패/취소 무관) 타임스탬프 정리
+    clearDeliveryTimers: assign({
+      deliveryStartedAt: () => null,
+      arrivedAtDoorAt: () => null,
+    }),
+    // Entry action on AT_DOOR 진입 — 문 앞 도착 시각 기록. after timeout 계산의 기준점.
+    markArrivedAtDoor: assign({ arrivedAtDoorAt: () => new Date() }),
   },
 }).createMachine({
   id: 'shipment',
@@ -109,6 +139,8 @@ export const shipmentMachine = setup({
     failureCount: input.failureCount ?? 0,
     maxRetries: input.maxRetries ?? 2,
     paidAmount: input.paidAmount ?? null,
+    deliveryStartedAt: input.deliveryStartedAt ?? null,
+    arrivedAtDoorAt: input.arrivedAtDoorAt ?? null,
   }),
   states: {
     delivery: {
@@ -166,6 +198,11 @@ export const shipmentMachine = setup({
           },
         },
         OUT_FOR_DELIVERY: {
+          // Entry action — 상태 진입 시 배송 시작 타임스탬프 기록 (transition 종류 무관)
+          entry: { type: 'markDeliveryStart' },
+          // Exit action — 상태 이탈 시 (DELIVER / FAIL_DELIVERY / TIMEOUT_DELIVERY / CANCEL 등) 타이머 정리
+          exit: { type: 'clearDeliveryTimers' },
+          initial: 'EN_ROUTE',
           on: {
             DELIVER: {
               guard: 'isPaid',
@@ -175,9 +212,36 @@ export const shipmentMachine = setup({
               target: 'DELIVERY_FAILED',
               actions: { type: 'incrementFailure' },
             },
+            // Cron 이 dispatch — arrivedAtDoorAt 이 timeout 넘긴 shipment 에 대해 실행
+            TIMEOUT_DELIVERY: {
+              target: 'DELIVERY_FAILED',
+              actions: { type: 'incrementFailure' },
+            },
+          },
+          states: {
+            EN_ROUTE: {
+              on: {
+                ARRIVE_AT_DOOR: { target: 'AT_DOOR' },
+              },
+            },
+            AT_DOOR: {
+              // Entry action — 문 앞 도착 시각 기록. after / cron timeout 의 기준점.
+              entry: { type: 'markArrivedAtDoor' },
+              // ⚠️ `after` 는 XState 의 delayed transition — actor 가 살아있는 동안에만 fire 된다.
+              // 이 프로젝트는 runTransition 이 매 요청마다 actor 를 만들고 stop 하므로 실제로는 안 fire.
+              // 선언 자체는 (1) 도메인 의도 문서화, (2) Stately Inspector 시각화 목적.
+              // 실제 timeout 은 DeliveryTimeoutService (@Cron) 가 TIMEOUT_DELIVERY 이벤트로 dispatch.
+              after: {
+                900000: {
+                  target: '#deliveryFailed',
+                  actions: { type: 'incrementFailure' },
+                },
+              },
+            },
           },
         },
         DELIVERY_FAILED: {
+          id: 'deliveryFailed',
           on: {
             RETRY_DELIVERY: {
               guard: 'canRetryDelivery',
