@@ -30,7 +30,8 @@
       "@@kafka": ["src/common/kafka/index"],
       "@@guards": ["src/common/guards/index"],
       "@@db": ["src/common/prisma/index"],
-      "@@state-machines": ["src/common/state-machines/index"]
+      "@@state-machines": ["src/common/state-machines/index"],
+      "@@outbox": ["src/common/outbox/index"]
     }
   }
 }

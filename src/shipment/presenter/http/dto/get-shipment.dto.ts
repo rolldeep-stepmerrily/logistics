@@ -10,6 +10,12 @@ export class GetShipmentResponseDataDto {
   @ApiProperty({ type: String })
   readonly status!: string;
 
+  @ApiProperty({ type: String, description: 'payment 서브머신 상태' })
+  readonly paymentStatus!: string;
+
+  @ApiProperty({ type: Number, nullable: true, description: '결제 금액 (원)' })
+  readonly paidAmount!: number | null;
+
   @ApiProperty({ type: String })
   readonly recipientName!: string;
 

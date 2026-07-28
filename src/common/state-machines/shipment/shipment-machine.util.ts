@@ -1,33 +1,43 @@
 import { createActor } from 'xstate';
 
+import { getShipmentInspector } from '../inspector';
 import {
-  shipmentMachine,
+  type ShipmentDeliveryState,
   type ShipmentEventInput,
   type ShipmentMachineContext,
-  type ShipmentMachineState,
+  type ShipmentMachineValue,
+  type ShipmentPaymentState,
+  shipmentMachine,
 } from './shipment.machine';
 
 interface ITransitionInput {
-  currentStatus: ShipmentMachineState;
+  currentDelivery: ShipmentDeliveryState;
+  currentPayment: ShipmentPaymentState;
   context: ShipmentMachineContext;
   event: ShipmentEventInput;
 }
 
-interface ITransitionResult {
-  nextStatus: ShipmentMachineState;
+export interface ITransitionResult {
+  nextDelivery: ShipmentDeliveryState;
+  nextPayment: ShipmentPaymentState;
   context: ShipmentMachineContext;
+  deliveryChanged: boolean;
+  paymentChanged: boolean;
   changed: boolean;
 }
 
 /**
- * 저장된 shipment 상태로부터 machine snapshot을 복원한다.
- * getPersistedSnapshot으로 재직렬화 가능한 형태로 반환.
+ * Parallel machine 의 저장된 상태 (delivery + payment) 로부터 snapshot 을 복원한다.
  */
-export const resolveShipmentSnapshot = (currentStatus: ShipmentMachineState, context: ShipmentMachineContext) => {
+export const resolveShipmentSnapshot = (
+  currentDelivery: ShipmentDeliveryState,
+  currentPayment: ShipmentPaymentState,
+  context: ShipmentMachineContext,
+) => {
   const actor = createActor(shipmentMachine, { input: context });
   actor.start();
   return shipmentMachine.resolveState({
-    value: currentStatus,
+    value: { delivery: currentDelivery, payment: currentPayment },
     context,
     // biome-ignore lint/suspicious/noExplicitAny: XState 5의 resolveState 타입이 union으로 좁혀지지 않아 명시적 우회
   } as any);
@@ -36,21 +46,36 @@ export const resolveShipmentSnapshot = (currentStatus: ShipmentMachineState, con
 /**
  * 현재 상태 + 이벤트를 받아 다음 상태를 계산한다.
  *
- * 순수 함수처럼 사용 — DB 저장 / Kafka 발행은 호출자 책임.
- * transition이 거절되면 changed=false로 반환하며, 호출자가 AppException을 발생시킨다.
+ * Parallel machine 이라 delivery / payment 두 서브머신 중 어느 쪽이 바뀌었는지 각각 체크한다.
+ * 둘 다 안 바뀌면 changed=false → 호출자는 INVALID_TRANSITION 예외를 던진다.
  */
-export const runTransition = ({ currentStatus, context, event }: ITransitionInput): ITransitionResult => {
-  const snapshot = resolveShipmentSnapshot(currentStatus, context);
-  const actor = createActor(shipmentMachine, { snapshot, input: context });
+export const runTransition = ({
+  currentDelivery,
+  currentPayment,
+  context,
+  event,
+}: ITransitionInput): ITransitionResult => {
+  const snapshot = resolveShipmentSnapshot(currentDelivery, currentPayment, context);
+  const inspect = getShipmentInspector();
+  const actor = createActor(shipmentMachine, { snapshot, input: context, inspect });
   actor.start();
   actor.send(event);
   const next = actor.getSnapshot();
   actor.stop();
 
-  const nextStatus = next.value as ShipmentMachineState;
+  const value = next.value as ShipmentMachineValue;
+  const nextDelivery = value.delivery;
+  const nextPayment = value.payment;
+
+  const deliveryChanged = nextDelivery !== currentDelivery;
+  const paymentChanged = nextPayment !== currentPayment;
+
   return {
-    nextStatus,
+    nextDelivery,
+    nextPayment,
     context: next.context,
-    changed: nextStatus !== currentStatus,
+    deliveryChanged,
+    paymentChanged,
+    changed: deliveryChanged || paymentChanged,
   };
 };

@@ -76,6 +76,8 @@ model Shipment {
   trackingNumber String         @unique
   senderId       Int
   status         ShipmentStatus @default(CREATED)
+  paymentStatus  PaymentStatus  @default(PENDING)
+  paidAmount     Int?
 
   recipientName  String
   recipientPhone String
@@ -195,6 +197,12 @@ enum ShipmentStatus {
   DELIVERY_FAILED
   RETURNED
   CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  REFUNDED
 }
 
 enum ActorType {

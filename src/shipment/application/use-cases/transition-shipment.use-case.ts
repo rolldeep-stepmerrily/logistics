@@ -41,13 +41,16 @@ export class TransitionShipmentUseCase {
     );
 
     this.logger.log(
-      `Shipment transition: id=${shipmentId} ${result.previousStatus} → ${result.currentStatus} via ${bodyDto.event}`,
+      `Shipment transition: id=${shipmentId} delivery=${result.previousStatus}→${result.currentStatus} ` +
+        `payment=${result.previousPaymentStatus}→${result.currentPaymentStatus} via ${bodyDto.event}`,
     );
 
     return TransitionShipmentResponseDataDto.from({
       id: result.id,
       previousStatus: result.previousStatus,
       currentStatus: result.currentStatus,
+      previousPaymentStatus: result.previousPaymentStatus,
+      currentPaymentStatus: result.currentPaymentStatus,
     });
   }
 
@@ -65,6 +68,10 @@ export class TransitionShipmentUseCase {
       case ShipmentTransitionEventType.FailDelivery: {
         return { type, reason: payload?.reason ?? 'UNKNOWN' };
       }
+      case ShipmentTransitionEventType.ConfirmPayment: {
+        if (!payload?.amount) throw new AppException(SHIPMENT_ERRORS.PAYMENT_AMOUNT_REQUIRED);
+        return { type, amount: payload.amount };
+      }
       case ShipmentTransitionEventType.RequestPickup:
       case ShipmentTransitionEventType.MarkPickedUp:
       case ShipmentTransitionEventType.ArriveAtOriginHub:
@@ -73,6 +80,7 @@ export class TransitionShipmentUseCase {
       case ShipmentTransitionEventType.RetryDelivery:
       case ShipmentTransitionEventType.Return:
       case ShipmentTransitionEventType.Cancel:
+      case ShipmentTransitionEventType.RefundPayment:
         return { type };
       default: {
         const _exhaustive: never = type;

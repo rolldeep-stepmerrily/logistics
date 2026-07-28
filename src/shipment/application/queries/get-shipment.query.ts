@@ -1,11 +1,13 @@
 import { PrismaService } from '@@db';
-import { ShipmentStatus } from '@@prisma';
+import { PaymentStatus, ShipmentStatus } from '@@prisma';
 import { IQueryHandler, Query, QueryHandler } from '@nestjs/cqrs';
 
 interface GetShipmentResult {
   id: number;
   trackingNumber: string;
   status: ShipmentStatus;
+  paymentStatus: PaymentStatus;
+  paidAmount: number | null;
   recipientName: string;
   recipientAddr: string;
   originHubId: number;
@@ -31,6 +33,8 @@ export class GetShipmentQueryHandler implements IQueryHandler<GetShipmentQuery, 
         id: true,
         trackingNumber: true,
         status: true,
+        paymentStatus: true,
+        paidAmount: true,
         recipientName: true,
         recipientAddr: true,
         originHubId: true,

@@ -10,6 +10,7 @@ import type ms from 'ms';
 import { GlobalCqrsModule } from './common/cqrs';
 import { KafkaModule } from './common/kafka';
 import { HttpLoggerMiddleware } from './common/middlewares';
+import { OutboxModule } from './common/outbox';
 import { PrismaModule } from './common/prisma';
 import { RedisModule, RedisThrottlerStorage } from './common/redis';
 import { DriverModule } from './driver/driver.module';
@@ -31,6 +32,7 @@ import { WarehouseModule } from './warehouse/warehouse.module';
       validationSchema: Joi.object({
         NODE_ENV: Joi.string().valid('local', 'development', 'production').default('development').empty(''),
         PORT: Joi.number().default(3001),
+        XSTATE_INSPECT: Joi.string().valid('true', 'false').default('false'),
         DATABASE_URL: Joi.string().required(),
         REDIS_HOST: Joi.string().required(),
         REDIS_PORT: Joi.number().default(6379),
@@ -58,6 +60,7 @@ import { WarehouseModule } from './warehouse/warehouse.module';
     GlobalCqrsModule,
     PrismaModule,
     KafkaModule,
+    OutboxModule,
     WarehouseModule,
     DriverModule,
     ShipmentModule,

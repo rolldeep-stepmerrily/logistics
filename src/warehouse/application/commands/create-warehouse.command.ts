@@ -17,9 +17,7 @@ export class CreateWarehouseCommand extends Command<CreateWarehouseResult> {
 }
 
 @CommandHandler(CreateWarehouseCommand)
-export class CreateWarehouseCommandHandler
-  implements ICommandHandler<CreateWarehouseCommand, CreateWarehouseResult>
-{
+export class CreateWarehouseCommandHandler implements ICommandHandler<CreateWarehouseCommand, CreateWarehouseResult> {
   constructor(private readonly prisma: PrismaService) {}
 
   async execute(command: CreateWarehouseCommand): Promise<CreateWarehouseResult> {
