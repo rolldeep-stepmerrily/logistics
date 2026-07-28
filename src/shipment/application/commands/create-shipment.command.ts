@@ -1,7 +1,7 @@
 import { PrismaService } from '@@db';
 import { ActorType, ShipmentStatus } from '@@prisma';
-import { Command, CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { randomBytes } from 'node:crypto';
+import { Command, CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 
 interface CreateShipmentResult {
   id: number;
@@ -26,8 +26,16 @@ export class CreateShipmentCommandHandler implements ICommandHandler<CreateShipm
    * @returns {Promise<CreateShipmentResult>} 생성된 shipment
    */
   async execute(command: CreateShipmentCommand): Promise<CreateShipmentResult> {
-    const { senderId, recipientName, recipientPhone, recipientAddr, originHubId, destinationHubId, weightG, declaredValue } =
-      command.props;
+    const {
+      senderId,
+      recipientName,
+      recipientPhone,
+      recipientAddr,
+      originHubId,
+      destinationHubId,
+      weightG,
+      declaredValue,
+    } = command.props;
 
     const trackingNumber = `WP-${randomBytes(4).toString('hex').toUpperCase()}`;
 

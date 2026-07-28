@@ -49,6 +49,7 @@
     "@nestjs/cli": "^11.0.0",
     "@nestjs/schematics": "^11.0.0",
     "@nestjs/testing": "^11.0.0",
+    "@statelyai/inspect": "^0.7.2",
     "@types/bcryptjs": "^3.0.0",
     "@types/express": "^5.0.0",
     "@types/jest": "^29.5.2",
@@ -100,6 +101,7 @@
       "^@@guards$": "<rootDir>/common/guards/index",
       "^@@db$": "<rootDir>/common/prisma/index",
       "^@@state-machines$": "<rootDir>/common/state-machines/index",
+      "^@@outbox$": "<rootDir>/common/outbox/index",
       "^src/(.*)$": "<rootDir>/$1"
     }
   }

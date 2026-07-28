@@ -25,6 +25,8 @@ export const ShipmentTransitionEventType = {
   RetryDelivery: 'RETRY_DELIVERY',
   Return: 'RETURN',
   Cancel: 'CANCEL',
+  ConfirmPayment: 'CONFIRM_PAYMENT',
+  RefundPayment: 'REFUND_PAYMENT',
 } as const;
 
 export type ShipmentTransitionEventType =
@@ -37,7 +39,11 @@ export class TransitionPayloadDto {
   @Min(1)
   readonly driverId?: number;
 
-  @ApiProperty({ example: 'https://cdn.example.com/proofs/123.jpg', required: false, description: 'DELIVER 시 증빙 URL' })
+  @ApiProperty({
+    example: 'https://cdn.example.com/proofs/123.jpg',
+    required: false,
+    description: 'DELIVER 시 증빙 URL',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(500)
@@ -48,6 +54,12 @@ export class TransitionPayloadDto {
   @IsString()
   @MaxLength(200)
   readonly reason?: string;
+
+  @ApiProperty({ example: 15000, required: false, description: 'CONFIRM_PAYMENT 시 결제 금액 (원)' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  readonly amount?: number;
 }
 
 export class TransitionShipmentRequestBodyDto {
@@ -72,13 +84,25 @@ export class TransitionShipmentResponseDataDto {
   @ApiProperty({ type: Number })
   readonly id!: number;
 
-  @ApiProperty({ type: String, description: '이전 상태' })
+  @ApiProperty({ type: String, description: '이전 delivery 상태' })
   readonly previousStatus!: string;
 
-  @ApiProperty({ type: String, description: '전이 후 상태' })
+  @ApiProperty({ type: String, description: '전이 후 delivery 상태' })
   readonly currentStatus!: string;
 
+  @ApiProperty({ type: String, description: '이전 payment 상태' })
+  readonly previousPaymentStatus!: string;
+
+  @ApiProperty({ type: String, description: '전이 후 payment 상태' })
+  readonly currentPaymentStatus!: string;
+
   static from(data: TransitionShipmentResponseDataDto): TransitionShipmentResponseDataDto {
-    return { id: data.id, previousStatus: data.previousStatus, currentStatus: data.currentStatus };
+    return {
+      id: data.id,
+      previousStatus: data.previousStatus,
+      currentStatus: data.currentStatus,
+      previousPaymentStatus: data.previousPaymentStatus,
+      currentPaymentStatus: data.currentPaymentStatus,
+    };
   }
 }
