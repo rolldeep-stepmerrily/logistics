@@ -76,6 +76,13 @@ model Shipment {
   trackingNumber String         @unique
   senderId       Int
   status         ShipmentStatus @default(CREATED)
+  paymentStatus  PaymentStatus  @default(PENDING)
+  paidAmount     Int?
+
+  // OUT_FOR_DELIVERY sub-state (compound state 표현) + SLA 타임스탬프
+  deliveryPhase     DeliveryPhase?
+  deliveryStartedAt DateTime?
+  arrivedAtDoorAt   DateTime?
 
   recipientName  String
   recipientPhone String
@@ -195,6 +202,17 @@ enum ShipmentStatus {
   DELIVERY_FAILED
   RETURNED
   CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  REFUNDED
+}
+
+enum DeliveryPhase {
+  EN_ROUTE
+  AT_DOOR
 }
 
 enum ActorType {

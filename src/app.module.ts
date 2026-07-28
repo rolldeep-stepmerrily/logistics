@@ -1,13 +1,16 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { JwtModule } from '@nestjs/jwt';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import Joi from 'joi';
+import type ms from 'ms';
 
 import { GlobalCqrsModule } from './common/cqrs';
 import { KafkaModule } from './common/kafka';
 import { HttpLoggerMiddleware } from './common/middlewares';
+import { OutboxModule } from './common/outbox';
 import { PrismaModule } from './common/prisma';
 import { RedisModule, RedisThrottlerStorage } from './common/redis';
 import { DriverModule } from './driver/driver.module';
@@ -29,6 +32,7 @@ import { WarehouseModule } from './warehouse/warehouse.module';
       validationSchema: Joi.object({
         NODE_ENV: Joi.string().valid('local', 'development', 'production').default('development').empty(''),
         PORT: Joi.number().default(3001),
+        XSTATE_INSPECT: Joi.string().valid('true', 'false').default('false'),
         DATABASE_URL: Joi.string().required(),
         REDIS_HOST: Joi.string().required(),
         REDIS_PORT: Joi.number().default(6379),
@@ -45,9 +49,18 @@ import { WarehouseModule } from './warehouse/warehouse.module';
       envFilePath: '.env',
       validationOptions: { abortEarly: true },
     }),
+    JwtModule.registerAsync({
+      global: true,
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        secret: configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
+        signOptions: { expiresIn: configService.getOrThrow<string>('JWT_ACCESS_EXPIRES_IN') as ms.StringValue },
+      }),
+    }),
     GlobalCqrsModule,
     PrismaModule,
     KafkaModule,
+    OutboxModule,
     WarehouseModule,
     DriverModule,
     ShipmentModule,

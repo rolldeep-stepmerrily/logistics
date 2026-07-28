@@ -31,4 +31,14 @@ export const SHIPMENT_ERRORS = {
     errorCode: 'SHIPMENT_DELIVERY_PROOF_REQUIRED',
     message: 'Delivery proof is required to mark shipment as delivered',
   },
+  ROUTING_FAILED: {
+    statusCode: HttpStatus.BAD_GATEWAY,
+    errorCode: 'SHIPMENT_ROUTING_FAILED',
+    message: 'Routing service failed to suggest a route',
+  },
+  PAYMENT_AMOUNT_REQUIRED: {
+    statusCode: HttpStatus.BAD_REQUEST,
+    errorCode: 'SHIPMENT_PAYMENT_AMOUNT_REQUIRED',
+    message: 'Payment amount is required to confirm payment',
+  },
 } as const;

@@ -1,14 +1,26 @@
 import { JwtGuard } from '@@guards';
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseIntPipe,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
 
 import { CreateDriverUseCase } from '../../application/use-cases/create-driver.use-case';
 import { GetDriversUseCase } from '../../application/use-cases/get-drivers.use-case';
 import { UpdateDriverStatusUseCase } from '../../application/use-cases/update-driver-status.use-case';
+import { DriverRouter } from './driver.path.presenter';
 import { CreateDriverRequestBodyDto, CreateDriverResponseDataDto } from './dto/create-driver.dto';
 import { GetDriversRequestQueryDto, GetDriversResponseDataDto } from './dto/get-drivers.dto';
 import { UpdateDriverStatusRequestBodyDto, UpdateDriverStatusResponseDataDto } from './dto/update-driver-status.dto';
-import { DriverRouter } from './driver.path.presenter';
 
 @ApiTags(DriverRouter.HttpApiTags)
 @Controller(DriverRouter.Root)

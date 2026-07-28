@@ -12,6 +12,12 @@ export class PlanRouteUseCase {
     const result = await this.commandBus.execute(
       new PlanRouteCommand({ shipmentId: props.shipmentId, hops: props.bodyDto.hops }),
     );
-    return { shipmentId: result.shipmentId, hops: result.hops, totalHops: result.totalHops };
+    return {
+      shipmentId: result.shipmentId,
+      hops: result.hops,
+      totalHops: result.totalHops,
+      etaMinutes: result.etaMinutes,
+      source: result.source,
+    };
   }
 }

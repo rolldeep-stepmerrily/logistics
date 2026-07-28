@@ -1,7 +1,14 @@
 import { PrismaService } from '@@db';
 import { AppException } from '@@exceptions';
-import { ActorType, DriverStatus, Prisma, ShipmentStatus } from '@@prisma';
-import { runTransition, type ShipmentEventInput, type ShipmentMachineState } from '@@state-machines';
+import { OUTBOX_EVENT_TYPES } from '@@outbox';
+import { ActorType, DeliveryPhase, DriverStatus, PaymentStatus, Prisma, ShipmentStatus } from '@@prisma';
+import {
+  runTransition,
+  type ShipmentDeliveryPhase,
+  type ShipmentDeliveryState,
+  type ShipmentEventInput,
+  type ShipmentPaymentState,
+} from '@@state-machines';
 import { Command, CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 
 import { SHIPMENT_ERRORS } from '../../shipment.error';
@@ -10,6 +17,10 @@ interface TransitionShipmentResult {
   id: number;
   previousStatus: ShipmentStatus;
   currentStatus: ShipmentStatus;
+  previousPaymentStatus: PaymentStatus;
+  currentPaymentStatus: PaymentStatus;
+  previousDeliveryPhase: DeliveryPhase | null;
+  currentDeliveryPhase: DeliveryPhase | null;
 }
 
 export class TransitionShipmentCommand extends Command<TransitionShipmentResult> {
@@ -27,11 +38,13 @@ export class TransitionShipmentCommandHandler
   /**
    * Shipment 상태 전이의 유일한 통로.
    *
+   * Parallel machine 이므로 delivery / payment 두 서브머신 중 어느 쪽이든 바뀌면 전이 성공.
+   *
    * 절차:
-   *   1) 현재 shipment 로드 (routePlan/현재 driver 컨텍스트 포함)
-   *   2) XState machine에 이벤트 던져서 다음 상태 계산 (guard 실패 시 same-state 반환)
-   *   3) 다음 상태가 같으면 INVALID_TRANSITION 예외
-   *   4) 트랜잭션 안에서 shipment.status 업데이트 + shipmentEvent 로그 + 부수효과 실행
+   *   1) 현재 shipment 로드 (delivery + payment + routePlan + driver assignments 포함)
+   *   2) XState machine 에 이벤트 던져서 다음 상태 계산 (guard 실패 시 same-state 반환)
+   *   3) 둘 다 안 바뀌면 INVALID_TRANSITION 예외
+   *   4) 트랜잭션 안에서 status / paymentStatus 업데이트 + shipmentEvent 로그 + outbox event + 부수효과
    *
    * 부수효과 (같은 트랜잭션 안):
    *   - MARK_PICKED_UP → driver 상태를 BUSY로 유지, currentHub null 처리
@@ -40,6 +53,7 @@ export class TransitionShipmentCommandHandler
    *   - ARRIVE_AT_HUB → currentHub = routePlan.hops[nextIndex]
    *   - DELIVER → currentHub = destinationHub, last-mile driver 할당 종료 + AVAILABLE, deliveryProof 저장
    *   - FAIL_DELIVERY → failureReason 저장
+   *   - CONFIRM_PAYMENT → paidAmount 저장
    */
   async execute(command: TransitionShipmentCommand): Promise<TransitionShipmentResult> {
     const { shipmentId, actorType, actorId } = command.props;
@@ -61,10 +75,15 @@ export class TransitionShipmentCommandHandler
         totalHops: (shipment.routePlan?.hops as string[] | undefined)?.length ?? 1,
         failureCount: 0,
         maxRetries: 2,
+        paidAmount: shipment.paidAmount ?? null,
+        deliveryStartedAt: shipment.deliveryStartedAt ?? null,
+        arrivedAtDoorAt: shipment.arrivedAtDoorAt ?? null,
       };
 
       const result = runTransition({
-        currentStatus: shipment.status as ShipmentMachineState,
+        currentDelivery: shipment.status as ShipmentDeliveryState,
+        currentPayment: shipment.paymentStatus as ShipmentPaymentState,
+        currentDeliveryPhase: (shipment.deliveryPhase as ShipmentDeliveryPhase | null) ?? null,
         context,
         event,
       });
@@ -73,13 +92,15 @@ export class TransitionShipmentCommandHandler
         throw new AppException(SHIPMENT_ERRORS.INVALID_TRANSITION);
       }
 
-      const nextStatus = result.nextStatus as ShipmentStatus;
+      const nextDelivery = result.nextDelivery as ShipmentStatus;
+      const nextPayment = result.nextPayment as PaymentStatus;
+      const nextDeliveryPhase = (result.nextDeliveryPhase as DeliveryPhase | null) ?? null;
 
       const patch = await this.buildSideEffects({
         tx,
         shipmentId,
         event,
-        nextStatus,
+        nextDelivery,
         currentHubId: shipment.currentHubId,
         originHubId: shipment.originHubId,
         destinationHubId: shipment.destinationHubId,
@@ -90,14 +111,23 @@ export class TransitionShipmentCommandHandler
 
       await tx.shipment.update({
         where: { id: shipmentId },
-        data: { status: nextStatus, ...patch },
+        data: {
+          status: nextDelivery,
+          paymentStatus: nextPayment,
+          paidAmount: result.context.paidAmount,
+          // Entry/exit actions 이 갱신한 context 를 그대로 DB 에 persist
+          deliveryPhase: nextDeliveryPhase,
+          deliveryStartedAt: result.context.deliveryStartedAt,
+          arrivedAtDoorAt: result.context.arrivedAtDoorAt,
+          ...patch,
+        },
       });
 
       await tx.shipmentEvent.create({
         data: {
           shipmentId,
           fromStatus: shipment.status,
-          toStatus: nextStatus,
+          toStatus: nextDelivery,
           eventType: event.type,
           payload: event as Prisma.InputJsonValue,
           actorType,
@@ -105,10 +135,32 @@ export class TransitionShipmentCommandHandler
         },
       });
 
+      await tx.outboxEvent.create({
+        data: {
+          aggregateId: String(shipmentId),
+          eventType: OUTBOX_EVENT_TYPES.SHIPMENT_TRANSITIONED,
+          payload: {
+            shipmentId,
+            fromStatus: shipment.status,
+            toStatus: nextDelivery,
+            fromPaymentStatus: shipment.paymentStatus,
+            toPaymentStatus: nextPayment,
+            fromDeliveryPhase: shipment.deliveryPhase,
+            toDeliveryPhase: nextDeliveryPhase,
+            eventType: event.type,
+            occurredAt: new Date().toISOString(),
+          },
+        },
+      });
+
       return {
         id: shipmentId,
         previousStatus: shipment.status,
-        currentStatus: nextStatus,
+        currentStatus: nextDelivery,
+        previousPaymentStatus: shipment.paymentStatus,
+        currentPaymentStatus: nextPayment,
+        previousDeliveryPhase: shipment.deliveryPhase,
+        currentDeliveryPhase: nextDeliveryPhase,
       };
     });
   }
@@ -121,7 +173,7 @@ export class TransitionShipmentCommandHandler
     tx: Prisma.TransactionClient;
     shipmentId: number;
     event: ShipmentEventInput;
-    nextStatus: ShipmentStatus;
+    nextDelivery: ShipmentStatus;
     currentHubId: number | null;
     originHubId: number;
     destinationHubId: number;
@@ -133,7 +185,7 @@ export class TransitionShipmentCommandHandler
       tx,
       shipmentId,
       event,
-      nextStatus,
+      nextDelivery,
       currentHubId,
       originHubId,
       destinationHubId,
@@ -183,12 +235,17 @@ export class TransitionShipmentCommandHandler
         patch.failureReason = event.reason;
         break;
       }
+      case 'TIMEOUT_DELIVERY': {
+        // Cron 이 dispatch — 문 앞에서 15분 응답 없이 만료된 경우
+        patch.failureReason = 'NO_RESPONSE_TIMEOUT';
+        break;
+      }
       case 'CANCEL': {
         await this.releaseActiveAssignment(tx, shipmentId);
         break;
       }
       default:
-        if (nextStatus === ShipmentStatus.CANCELLED && currentHubId !== null) {
+        if (nextDelivery === ShipmentStatus.CANCELLED && currentHubId !== null) {
           patch.currentHub = { disconnect: true };
         }
         break;
