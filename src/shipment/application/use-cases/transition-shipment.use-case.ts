@@ -81,6 +81,7 @@ export class TransitionShipmentUseCase {
       case ShipmentTransitionEventType.Return:
       case ShipmentTransitionEventType.Cancel:
       case ShipmentTransitionEventType.RefundPayment:
+      case ShipmentTransitionEventType.ArriveAtDoor:
         return { type };
       default: {
         const _exhaustive: never = type;

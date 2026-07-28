@@ -27,6 +27,7 @@ export const ShipmentTransitionEventType = {
   Cancel: 'CANCEL',
   ConfirmPayment: 'CONFIRM_PAYMENT',
   RefundPayment: 'REFUND_PAYMENT',
+  ArriveAtDoor: 'ARRIVE_AT_DOOR',
 } as const;
 
 export type ShipmentTransitionEventType =

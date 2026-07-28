@@ -1,5 +1,5 @@
 import { PrismaService } from '@@db';
-import { PaymentStatus, ShipmentStatus } from '@@prisma';
+import { DeliveryPhase, PaymentStatus, ShipmentStatus } from '@@prisma';
 import { IQueryHandler, Query, QueryHandler } from '@nestjs/cqrs';
 
 interface GetShipmentResult {
@@ -8,6 +8,9 @@ interface GetShipmentResult {
   status: ShipmentStatus;
   paymentStatus: PaymentStatus;
   paidAmount: number | null;
+  deliveryPhase: DeliveryPhase | null;
+  deliveryStartedAt: Date | null;
+  arrivedAtDoorAt: Date | null;
   recipientName: string;
   recipientAddr: string;
   originHubId: number;
@@ -35,6 +38,9 @@ export class GetShipmentQueryHandler implements IQueryHandler<GetShipmentQuery, 
         status: true,
         paymentStatus: true,
         paidAmount: true,
+        deliveryPhase: true,
+        deliveryStartedAt: true,
+        arrivedAtDoorAt: true,
         recipientName: true,
         recipientAddr: true,
         originHubId: true,

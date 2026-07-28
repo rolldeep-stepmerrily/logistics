@@ -1,9 +1,10 @@
 import { PrismaService } from '@@db';
 import { AppException } from '@@exceptions';
 import { OUTBOX_EVENT_TYPES } from '@@outbox';
-import { ActorType, DriverStatus, PaymentStatus, Prisma, ShipmentStatus } from '@@prisma';
+import { ActorType, DeliveryPhase, DriverStatus, PaymentStatus, Prisma, ShipmentStatus } from '@@prisma';
 import {
   runTransition,
+  type ShipmentDeliveryPhase,
   type ShipmentDeliveryState,
   type ShipmentEventInput,
   type ShipmentPaymentState,
@@ -18,6 +19,8 @@ interface TransitionShipmentResult {
   currentStatus: ShipmentStatus;
   previousPaymentStatus: PaymentStatus;
   currentPaymentStatus: PaymentStatus;
+  previousDeliveryPhase: DeliveryPhase | null;
+  currentDeliveryPhase: DeliveryPhase | null;
 }
 
 export class TransitionShipmentCommand extends Command<TransitionShipmentResult> {
@@ -73,11 +76,14 @@ export class TransitionShipmentCommandHandler
         failureCount: 0,
         maxRetries: 2,
         paidAmount: shipment.paidAmount ?? null,
+        deliveryStartedAt: shipment.deliveryStartedAt ?? null,
+        arrivedAtDoorAt: shipment.arrivedAtDoorAt ?? null,
       };
 
       const result = runTransition({
         currentDelivery: shipment.status as ShipmentDeliveryState,
         currentPayment: shipment.paymentStatus as ShipmentPaymentState,
+        currentDeliveryPhase: (shipment.deliveryPhase as ShipmentDeliveryPhase | null) ?? null,
         context,
         event,
       });
@@ -88,6 +94,7 @@ export class TransitionShipmentCommandHandler
 
       const nextDelivery = result.nextDelivery as ShipmentStatus;
       const nextPayment = result.nextPayment as PaymentStatus;
+      const nextDeliveryPhase = (result.nextDeliveryPhase as DeliveryPhase | null) ?? null;
 
       const patch = await this.buildSideEffects({
         tx,
@@ -108,6 +115,10 @@ export class TransitionShipmentCommandHandler
           status: nextDelivery,
           paymentStatus: nextPayment,
           paidAmount: result.context.paidAmount,
+          // Entry/exit actions 이 갱신한 context 를 그대로 DB 에 persist
+          deliveryPhase: nextDeliveryPhase,
+          deliveryStartedAt: result.context.deliveryStartedAt,
+          arrivedAtDoorAt: result.context.arrivedAtDoorAt,
           ...patch,
         },
       });
@@ -134,6 +145,8 @@ export class TransitionShipmentCommandHandler
             toStatus: nextDelivery,
             fromPaymentStatus: shipment.paymentStatus,
             toPaymentStatus: nextPayment,
+            fromDeliveryPhase: shipment.deliveryPhase,
+            toDeliveryPhase: nextDeliveryPhase,
             eventType: event.type,
             occurredAt: new Date().toISOString(),
           },
@@ -146,6 +159,8 @@ export class TransitionShipmentCommandHandler
         currentStatus: nextDelivery,
         previousPaymentStatus: shipment.paymentStatus,
         currentPaymentStatus: nextPayment,
+        previousDeliveryPhase: shipment.deliveryPhase,
+        currentDeliveryPhase: nextDeliveryPhase,
       };
     });
   }
@@ -218,6 +233,11 @@ export class TransitionShipmentCommandHandler
       }
       case 'FAIL_DELIVERY': {
         patch.failureReason = event.reason;
+        break;
+      }
+      case 'TIMEOUT_DELIVERY': {
+        // Cron 이 dispatch — 문 앞에서 15분 응답 없이 만료된 경우
+        patch.failureReason = 'NO_RESPONSE_TIMEOUT';
         break;
       }
       case 'CANCEL': {

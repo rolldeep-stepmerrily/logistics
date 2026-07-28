@@ -7,6 +7,7 @@ import { PlanRouteCommandHandler } from './application/commands/plan-route.comma
 import { TransitionShipmentCommandHandler } from './application/commands/transition-shipment.command';
 import { GetShipmentQueryHandler } from './application/queries/get-shipment.query';
 import { GetShipmentEventsQueryHandler } from './application/queries/get-shipment-events.query';
+import { DeliveryTimeoutService } from './application/schedulers/delivery-timeout.service';
 import { CreateShipmentUseCase } from './application/use-cases/create-shipment.use-case';
 import { GetShipmentUseCase } from './application/use-cases/get-shipment.use-case';
 import { GetShipmentEventsUseCase } from './application/use-cases/get-shipment-events.use-case';
@@ -32,6 +33,9 @@ import { ShipmentHttpController } from './presenter/http/shipment.http.controlle
     GetShipmentEventsUseCase,
     TransitionShipmentUseCase,
     PlanRouteUseCase,
+
+    /** schedulers */
+    DeliveryTimeoutService,
 
     /** infrastructure */
     JwtGuard,
