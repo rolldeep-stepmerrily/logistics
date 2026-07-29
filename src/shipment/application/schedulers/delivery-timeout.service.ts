@@ -35,9 +35,15 @@ export class DeliveryTimeoutService {
     private readonly commandBus: TypedCommandBus<TransitionShipmentCommand>,
   ) {}
 
+  /**
+   * AT_DOOR 상태로 15분 이상 응답 없는 송장을 찾아 TIMEOUT_DELIVERY 이벤트 dispatch
+   */
   @Cron(CronExpression.EVERY_MINUTE)
   async scanExpiredAtDoor(): Promise<void> {
-    if (this.running) return;
+    if (this.running) {
+      return;
+    }
+
     this.running = true;
 
     try {
@@ -52,7 +58,9 @@ export class DeliveryTimeoutService {
         take: BATCH_SIZE,
       });
 
-      if (expired.length === 0) return;
+      if (expired.length === 0) {
+        return;
+      }
 
       for (const shipment of expired) {
         try {

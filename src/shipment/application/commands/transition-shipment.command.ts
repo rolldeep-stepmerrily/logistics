@@ -10,18 +10,9 @@ import {
   type ShipmentPaymentState,
 } from '@@state-machines';
 import { Command, CommandHandler, ICommandHandler } from '@nestjs/cqrs';
+import { isDefined } from 'class-validator';
 
 import { SHIPMENT_ERRORS } from '../../shipment.error';
-
-interface TransitionShipmentResult {
-  id: number;
-  previousStatus: ShipmentStatus;
-  currentStatus: ShipmentStatus;
-  previousPaymentStatus: PaymentStatus;
-  currentPaymentStatus: PaymentStatus;
-  previousDeliveryPhase: DeliveryPhase | null;
-  currentDeliveryPhase: DeliveryPhase | null;
-}
 
 export class TransitionShipmentCommand extends Command<TransitionShipmentResult> {
   constructor(public readonly props: TransitionShipmentCommandProps) {
@@ -36,24 +27,10 @@ export class TransitionShipmentCommandHandler
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Shipment 상태 전이의 유일한 통로.
+   * Shipment 상태 전이의 유일한 통로. Parallel machine 이므로 delivery / payment 두 서브머신 중 어느 쪽이든 바뀌면 전이 성공
    *
-   * Parallel machine 이므로 delivery / payment 두 서브머신 중 어느 쪽이든 바뀌면 전이 성공.
-   *
-   * 절차:
-   *   1) 현재 shipment 로드 (delivery + payment + routePlan + driver assignments 포함)
-   *   2) XState machine 에 이벤트 던져서 다음 상태 계산 (guard 실패 시 same-state 반환)
-   *   3) 둘 다 안 바뀌면 INVALID_TRANSITION 예외
-   *   4) 트랜잭션 안에서 status / paymentStatus 업데이트 + shipmentEvent 로그 + outbox event + 부수효과
-   *
-   * 부수효과 (같은 트랜잭션 안):
-   *   - MARK_PICKED_UP → driver 상태를 BUSY로 유지, currentHub null 처리
-   *   - ARRIVE_AT_ORIGIN_HUB → currentHub = originHub, pickup 담당 driver 할당 종료 + AVAILABLE
-   *   - DISPATCH_LINE_HAUL → currentHub null (허브 사이)
-   *   - ARRIVE_AT_HUB → currentHub = routePlan.hops[nextIndex]
-   *   - DELIVER → currentHub = destinationHub, last-mile driver 할당 종료 + AVAILABLE, deliveryProof 저장
-   *   - FAIL_DELIVERY → failureReason 저장
-   *   - CONFIRM_PAYMENT → paidAmount 저장
+   * @param {TransitionShipmentCommand} command 전이 커맨드
+   * @returns {Promise<TransitionShipmentResult>} 전이 결과 요약
    */
   async execute(command: TransitionShipmentCommand): Promise<TransitionShipmentResult> {
     const { shipmentId, actorType, actorId } = command.props;
@@ -65,7 +42,7 @@ export class TransitionShipmentCommandHandler
         include: { routePlan: true, assignments: { where: { status: 'ACTIVE' } } },
       });
 
-      if (!shipment) {
+      if (!isDefined(shipment)) {
         throw new AppException(SHIPMENT_ERRORS.NOT_FOUND);
       }
 
@@ -166,21 +143,12 @@ export class TransitionShipmentCommandHandler
   }
 
   /**
-   * 상태 전이에 따라 shipment / driver / routePlan 에 적용할 부수효과를 계산한다.
-   * 반환값은 shipment.update 의 data로 병합된다.
+   * 상태 전이에 따라 shipment / driver / routePlan 에 적용할 부수효과 계산. 반환값은 shipment.update 의 data 로 병합됨
+   *
+   * @param {BuildSideEffectsProps} props 부수효과 계산 파라미터
+   * @returns {Promise<Prisma.ShipmentUpdateInput>} shipment 업데이트 patch
    */
-  private async buildSideEffects(props: {
-    tx: Prisma.TransactionClient;
-    shipmentId: number;
-    event: ShipmentEventInput;
-    nextDelivery: ShipmentStatus;
-    currentHubId: number | null;
-    originHubId: number;
-    destinationHubId: number;
-    routePlanId?: number;
-    routeHops: string[];
-    currentHopIndex: number;
-  }): Promise<Prisma.ShipmentUpdateInput> {
+  private async buildSideEffects(props: BuildSideEffectsProps): Promise<Prisma.ShipmentUpdateInput> {
     const {
       tx,
       shipmentId,
@@ -211,13 +179,20 @@ export class TransitionShipmentCommandHandler
         break;
       }
       case 'ARRIVE_AT_HUB': {
-        if (!routePlanId) throw new AppException(SHIPMENT_ERRORS.ROUTE_NOT_PLANNED);
+        if (!isDefined(routePlanId)) {
+          throw new AppException(SHIPMENT_ERRORS.ROUTE_NOT_PLANNED);
+        }
+
         const nextHopIndex = currentHopIndex + 1;
         await tx.routePlan.update({ where: { id: routePlanId }, data: { currentHopIndex: nextHopIndex } });
         const hopCode = routeHops[nextHopIndex];
-        if (hopCode) {
+
+        if (isDefined(hopCode)) {
           const hub = await tx.warehouse.findUnique({ where: { code: hopCode }, select: { id: true } });
-          if (hub) patch.currentHub = { connect: { id: hub.id } };
+
+          if (isDefined(hub)) {
+            patch.currentHub = { connect: { id: hub.id } };
+          }
         }
         break;
       }
@@ -254,12 +229,16 @@ export class TransitionShipmentCommandHandler
     return patch;
   }
 
-  private async assignDriver(
-    tx: Prisma.TransactionClient,
-    params: { shipmentId: number; driverId: number; purpose: 'PICKUP' | 'LAST_MILE' | 'LINE_HAUL' },
-  ): Promise<void> {
+  /**
+   * driver 를 shipment 에 배정하고 driver 상태를 BUSY 로 전이
+   *
+   * @param {Prisma.TransactionClient} tx 트랜잭션 클라이언트
+   * @param {AssignDriverParams} params 배정 파라미터
+   */
+  private async assignDriver(tx: Prisma.TransactionClient, params: AssignDriverParams): Promise<void> {
     const driver = await tx.driver.findUnique({ where: { id: params.driverId }, select: { status: true } });
-    if (!driver || driver.status !== DriverStatus.AVAILABLE) {
+
+    if (!isDefined(driver) || driver.status !== DriverStatus.AVAILABLE) {
       throw new AppException(SHIPMENT_ERRORS.DRIVER_NOT_AVAILABLE);
     }
 
@@ -269,15 +248,29 @@ export class TransitionShipmentCommandHandler
     await tx.driver.update({ where: { id: params.driverId }, data: { status: DriverStatus.BUSY } });
   }
 
+  /**
+   * 활성 배정을 종료하고 driver 상태를 AVAILABLE 로 복귀
+   *
+   * @param {Prisma.TransactionClient} tx 트랜잭션 클라이언트
+   * @param {number} shipmentId 대상 송장 ID
+   * @param {'PICKUP' | 'LAST_MILE' | 'LINE_HAUL'} [purpose] 종료할 배정 목적
+   */
   private async releaseActiveAssignment(
     tx: Prisma.TransactionClient,
     shipmentId: number,
     purpose?: 'PICKUP' | 'LAST_MILE' | 'LINE_HAUL',
   ): Promise<void> {
     const where: Prisma.DriverAssignmentWhereInput = { shipmentId, status: 'ACTIVE' };
-    if (purpose) where.purpose = purpose;
+
+    if (isDefined(purpose)) {
+      where.purpose = purpose;
+    }
+
     const active = await tx.driverAssignment.findMany({ where, select: { id: true, driverId: true } });
-    if (active.length === 0) return;
+
+    if (active.length === 0) {
+      return;
+    }
 
     await tx.driverAssignment.updateMany({
       where: { id: { in: active.map((a) => a.id) } },
@@ -290,9 +283,38 @@ export class TransitionShipmentCommandHandler
   }
 }
 
+interface TransitionShipmentResult {
+  id: number;
+  previousStatus: ShipmentStatus;
+  currentStatus: ShipmentStatus;
+  previousPaymentStatus: PaymentStatus;
+  currentPaymentStatus: PaymentStatus;
+  previousDeliveryPhase: DeliveryPhase | null;
+  currentDeliveryPhase: DeliveryPhase | null;
+}
+
 interface TransitionShipmentCommandProps {
   shipmentId: number;
   event: ShipmentEventInput;
   actorType: ActorType;
   actorId?: string;
+}
+
+interface BuildSideEffectsProps {
+  tx: Prisma.TransactionClient;
+  shipmentId: number;
+  event: ShipmentEventInput;
+  nextDelivery: ShipmentStatus;
+  currentHubId: number | null;
+  originHubId: number;
+  destinationHubId: number;
+  routePlanId?: number;
+  routeHops: string[];
+  currentHopIndex: number;
+}
+
+interface AssignDriverParams {
+  shipmentId: number;
+  driverId: number;
+  purpose: 'PICKUP' | 'LAST_MILE' | 'LINE_HAUL';
 }

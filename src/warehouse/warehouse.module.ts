@@ -10,10 +10,17 @@ import { WarehouseHttpController } from './presenter/http/warehouse.http.control
 @Module({
   controllers: [WarehouseHttpController],
   providers: [
+    /** query-handlers */
     GetWarehousesQueryHandler,
+
+    /** command-handlers */
     CreateWarehouseCommandHandler,
+
+    /** use-cases */
     CreateWarehouseUseCase,
     GetWarehousesUseCase,
+
+    /** infrastructure */
     JwtGuard,
   ],
 })

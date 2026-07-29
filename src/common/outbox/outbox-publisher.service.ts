@@ -2,6 +2,7 @@ import { PrismaService } from '@@db';
 import { KafkaProducerService } from '@@kafka';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { isDefined } from 'class-validator';
 
 import { OUTBOX_TOPIC_MAPPING } from './outbox.constants';
 
@@ -18,18 +19,14 @@ export class OutboxPublisherService {
   ) {}
 
   /**
-   * 5초마다 발행 안 된 outbox_events 를 배치로 처리한다.
-   *
-   * 실행 원리:
-   *   1) publishedAt IS NULL 인 row 를 오래된 순으로 BATCH_SIZE 개 로드
-   *   2) 각각 Kafka 토픽에 발행 (eventType → topic 매핑)
-   *   3) 발행 성공한 row 에만 publishedAt 을 set
-   *
-   * 실패 시 publishedAt 이 null 로 남아 다음 tick 에서 재시도된다. 최소 1회 이상 발행 보장 (at-least-once).
+   * 5초마다 미발행 outbox_events 를 배치 처리. at-least-once 보장 (실패 시 publishedAt null 유지)
    */
   @Cron(CronExpression.EVERY_5_SECONDS)
   async publishPending(): Promise<void> {
-    if (this.running) return;
+    if (this.running) {
+      return;
+    }
+
     this.running = true;
 
     try {
@@ -39,25 +36,11 @@ export class OutboxPublisherService {
         take: BATCH_SIZE,
       });
 
-      if (pending.length === 0) return;
-
-      const publishedIds: number[] = [];
-      for (const event of pending) {
-        const topic = OUTBOX_TOPIC_MAPPING[event.eventType];
-        if (!topic) {
-          this.logger.warn(`No topic mapping for eventType=${event.eventType}, skipping id=${event.id}`);
-          continue;
-        }
-
-        try {
-          await this.kafka.sendMessage(topic, event.payload, event.aggregateId);
-          publishedIds.push(event.id);
-        } catch (err) {
-          this.logger.error(
-            `Failed to publish outbox event id=${event.id} type=${event.eventType}: ${(err as Error).message}`,
-          );
-        }
+      if (pending.length === 0) {
+        return;
       }
+
+      const publishedIds = await this.publishBatch(pending);
 
       if (publishedIds.length > 0) {
         await this.prisma.outboxEvent.updateMany({
@@ -72,4 +55,41 @@ export class OutboxPublisherService {
       this.running = false;
     }
   }
+
+  /**
+   * pending 이벤트 배열을 순회하며 각각을 Kafka 로 발행. 성공한 이벤트 ID 목록 반환
+   *
+   * @param {OutboxEventLike[]} pending 발행 대상 이벤트 배열
+   * @returns {Promise<number[]>} 발행 성공한 이벤트 ID 목록
+   */
+  private async publishBatch(pending: OutboxEventLike[]): Promise<number[]> {
+    const publishedIds: number[] = [];
+
+    for (const event of pending) {
+      const topic = OUTBOX_TOPIC_MAPPING[event.eventType];
+
+      if (!isDefined(topic)) {
+        this.logger.warn(`No topic mapping for eventType=${event.eventType}, skipping id=${event.id}`);
+        continue;
+      }
+
+      try {
+        await this.kafka.sendMessage(topic, event.payload, event.aggregateId);
+        publishedIds.push(event.id);
+      } catch (err) {
+        this.logger.error(
+          `Failed to publish outbox event id=${event.id} type=${event.eventType}: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    return publishedIds;
+  }
+}
+
+interface OutboxEventLike {
+  id: number;
+  eventType: string;
+  aggregateId: string;
+  payload: unknown;
 }

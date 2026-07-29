@@ -16,6 +16,12 @@ export class WarehouseHttpController {
     private readonly getWarehousesUseCase: GetWarehousesUseCase,
   ) {}
 
+  /**
+   * 창고 / 허브 신규 생성
+   *
+   * @param {CreateWarehouseRequestBodyDto} bodyDto 생성 요청 데이터
+   * @returns {Promise<CreateWarehouseResponseDataDto>} 생성된 창고 응답 DTO
+   */
   @ApiOperation({ summary: '창고/허브 생성' })
   @ApiBearerAuth('accessToken')
   @ApiBody({ type: CreateWarehouseRequestBodyDto })
@@ -26,6 +32,11 @@ export class WarehouseHttpController {
     return await this.createWarehouseUseCase.execute({ bodyDto });
   }
 
+  /**
+   * 창고 목록 조회
+   *
+   * @returns {Promise<GetWarehousesResponseDataDto>} 창고 목록 응답 DTO
+   */
   @ApiOperation({ summary: '창고 목록 조회' })
   @Get(WarehouseRouter.Http.GetList)
   async getWarehouses(): Promise<GetWarehousesResponseDataDto> {

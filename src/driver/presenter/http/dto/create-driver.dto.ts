@@ -30,4 +30,14 @@ export class CreateDriverResponseDataDto {
 
   @ApiProperty({ type: String })
   readonly name!: string;
+
+  /**
+   * 등록된 기사 엔티티로부터 응답 DTO 생성
+   *
+   * @param {CreateDriverResponseDataDto} data 응답 원본 데이터
+   * @returns {CreateDriverResponseDataDto} 매핑된 응답 DTO
+   */
+  static from(data: CreateDriverResponseDataDto): CreateDriverResponseDataDto {
+    return { id: data.id, name: data.name };
+  }
 }

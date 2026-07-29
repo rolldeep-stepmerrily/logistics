@@ -107,6 +107,7 @@ export const shipmentMachine = setup({
         if (event.type === 'ASSIGN_PICKUP_DRIVER' || event.type === 'DISPATCH_LAST_MILE') {
           return event.driverId;
         }
+
         return null;
       },
     }),
@@ -115,7 +116,10 @@ export const shipmentMachine = setup({
     incrementFailure: assign({ failureCount: ({ context }) => context.failureCount + 1 }),
     recordPayment: assign({
       paidAmount: ({ event }) => {
-        if (event.type === 'CONFIRM_PAYMENT') return event.amount;
+        if (event.type === 'CONFIRM_PAYMENT') {
+          return event.amount;
+        }
+
         return null;
       },
     }),

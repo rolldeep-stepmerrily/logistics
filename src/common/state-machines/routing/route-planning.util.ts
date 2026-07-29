@@ -12,11 +12,11 @@ export interface IRoutePlanningResult {
 }
 
 /**
- * routePlanningMachine 을 spawn 해서 최종 상태(planned/failed) 까지 실행한다.
+ * routePlanningMachine 을 spawn 해서 최종 상태 (planned/failed) 까지 실행. actor lifecycle 을 감춘 promise-friendly 어댑터
  *
- * 이 유틸의 존재 이유:
- *   - PlanRouteUseCase 가 XState actor lifecycle 을 몰라도 되도록 감싸는 얇은 어댑터
- *   - waitFor 로 promise-friendly API 제공
+ * @param {RoutingService} routingService 외부 라우팅 서비스
+ * @param {IRoutingRequest} req 라우팅 요청 (origin / destination)
+ * @returns {Promise<IRoutePlanningResult>} 최종 라우팅 결과
  */
 export const runRoutePlanning = async (
   routingService: RoutingService,

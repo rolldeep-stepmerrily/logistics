@@ -3,12 +3,6 @@ import { ActorType, ShipmentStatus } from '@@prisma';
 import { randomBytes } from 'node:crypto';
 import { Command, CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 
-interface CreateShipmentResult {
-  id: number;
-  trackingNumber: string;
-  status: ShipmentStatus;
-}
-
 export class CreateShipmentCommand extends Command<CreateShipmentResult> {
   constructor(public readonly props: CreateShipmentCommandProps) {
     super();
@@ -70,6 +64,12 @@ export class CreateShipmentCommandHandler implements ICommandHandler<CreateShipm
       return shipment;
     });
   }
+}
+
+interface CreateShipmentResult {
+  id: number;
+  trackingNumber: string;
+  status: ShipmentStatus;
 }
 
 interface CreateShipmentCommandProps {

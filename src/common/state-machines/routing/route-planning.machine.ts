@@ -16,16 +16,10 @@ export type RoutePlanningInput = {
 };
 
 /**
- * RoutingService 를 closure 로 잡아 machine 을 생성한다.
+ * RoutingService 를 closure 로 잡아 route planning state machine 을 생성. invoke 로 호출할 실제 구현체를 런타임에 주입하기 위한 factory
  *
- * 이렇게 factory 로 감싸는 이유:
- *   - machine 정의 자체는 순수하게 유지하고 싶은데, invoke 로 호출할 실제 구현체는 런타임에 주입해야 함
- *   - context 에 함수를 밀어넣는 트릭 없이 fromPromise 클로저로 서비스에 접근
- *
- * 흐름:
- *   idle → PLAN → planning
- *     ├─ (Promise resolve)  → planned (final)     context.hops / etaMinutes 세팅
- *     └─ (Promise reject)   → failed              context.error 세팅, RETRY 로 재시도 가능
+ * @param {RoutingService} routingService 외부 라우팅 호출 서비스
+ * @returns {ReturnType<typeof setup>['createMachine']} route planning machine
  */
 export const createRoutePlanningMachine = (routingService: RoutingService) =>
   setup({
@@ -42,18 +36,27 @@ export const createRoutePlanningMachine = (routingService: RoutingService) =>
     actions: {
       applyPlan: assign({
         hops: ({ event }) => {
-          if ('output' in event) return (event.output as IRoutingResponse).hops;
+          if ('output' in event) {
+            return (event.output as IRoutingResponse).hops;
+          }
+
           return [];
         },
         etaMinutes: ({ event }) => {
-          if ('output' in event) return (event.output as IRoutingResponse).etaMinutes;
+          if ('output' in event) {
+            return (event.output as IRoutingResponse).etaMinutes;
+          }
+
           return null;
         },
         error: () => null,
       }),
       applyError: assign({
         error: ({ event }) => {
-          if ('error' in event) return (event.error as Error)?.message ?? 'Unknown routing error';
+          if ('error' in event) {
+            return (event.error as Error)?.message ?? 'Unknown routing error';
+          }
+
           return 'Unknown routing error';
         },
       }),

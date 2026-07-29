@@ -42,26 +42,29 @@ export class GetShipmentResponseDataDto {
 
   @ApiProperty({ type: Date })
   readonly createdAt!: Date;
-}
 
-export class GetShipmentEventDto {
-  @ApiProperty({ type: Number })
-  readonly id!: number;
-
-  @ApiProperty({ type: String, nullable: true })
-  readonly fromStatus!: string | null;
-
-  @ApiProperty({ type: String })
-  readonly toStatus!: string;
-
-  @ApiProperty({ type: String })
-  readonly eventType!: string;
-
-  @ApiProperty({ type: Date })
-  readonly occurredAt!: Date;
-}
-
-export class GetShipmentEventsResponseDataDto {
-  @ApiProperty({ type: [GetShipmentEventDto] })
-  readonly events!: GetShipmentEventDto[];
+  /**
+   * 송장 상세 데이터로부터 응답 DTO 생성
+   *
+   * @param {GetShipmentResponseDataDto} data 원본 데이터
+   * @returns {GetShipmentResponseDataDto} 매핑된 응답 DTO
+   */
+  static from(data: GetShipmentResponseDataDto): GetShipmentResponseDataDto {
+    return {
+      id: data.id,
+      trackingNumber: data.trackingNumber,
+      status: data.status,
+      paymentStatus: data.paymentStatus,
+      paidAmount: data.paidAmount,
+      deliveryPhase: data.deliveryPhase,
+      deliveryStartedAt: data.deliveryStartedAt,
+      arrivedAtDoorAt: data.arrivedAtDoorAt,
+      recipientName: data.recipientName,
+      recipientAddr: data.recipientAddr,
+      originHubId: data.originHubId,
+      destinationHubId: data.destinationHubId,
+      currentHubId: data.currentHubId,
+      createdAt: data.createdAt,
+    };
+  }
 }

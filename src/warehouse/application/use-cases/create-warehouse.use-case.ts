@@ -11,8 +11,19 @@ import { CreateWarehouseCommand } from '../commands/create-warehouse.command';
 export class CreateWarehouseUseCase {
   constructor(private readonly commandBus: TypedCommandBus<CreateWarehouseCommand>) {}
 
-  async execute(props: { bodyDto: CreateWarehouseRequestBodyDto }): Promise<CreateWarehouseResponseDataDto> {
-    const result = await this.commandBus.execute(new CreateWarehouseCommand(props.bodyDto));
-    return result;
+  /**
+   * 신규 창고 생성 UseCase 진입점
+   *
+   * @param {CreateWarehouseUseCaseProps} props 실행 파라미터
+   * @returns {Promise<CreateWarehouseResponseDataDto>} 생성된 창고 응답 DTO
+   */
+  async execute(props: CreateWarehouseUseCaseProps): Promise<CreateWarehouseResponseDataDto> {
+    const warehouse = await this.commandBus.execute(new CreateWarehouseCommand(props.bodyDto));
+
+    return CreateWarehouseResponseDataDto.from(warehouse);
   }
+}
+
+interface CreateWarehouseUseCaseProps {
+  bodyDto: CreateWarehouseRequestBodyDto;
 }

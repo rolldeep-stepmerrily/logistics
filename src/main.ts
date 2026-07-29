@@ -11,7 +11,12 @@ import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters';
 import { TransformInterceptor } from './common/interceptors';
 
-const bootstrap = async () => {
+/**
+ * NestJS 애플리케이션 부트스트랩
+ *
+ * @returns {Promise<void>} 서버 시작 완료 시 resolve
+ */
+const bootstrap = async (): Promise<void> => {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   const configService = app.get(ConfigService);
@@ -47,7 +52,9 @@ const bootstrap = async () => {
 
   if (isProduction) {
     app.use(helmet());
-  } else {
+  }
+
+  if (!isProduction) {
     const config = new DocumentBuilder()
       .setTitle('Logistics API')
       .setDescription('State machine 학습용 배송 도메인 API — Shipment 상태 전이는 /shipments/:id/transitions 로 실행')
