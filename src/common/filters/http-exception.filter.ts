@@ -12,6 +12,12 @@ interface IErrorResponse {
 export class HttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(HttpExceptionFilter.name);
 
+  /**
+   * 전역 예외를 catch 하여 정규화된 응답으로 변환
+   *
+   * @param {unknown} exception 처리할 예외
+   * @param {ArgumentsHost} host NestJS 실행 컨텍스트 호스트
+   */
   catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();

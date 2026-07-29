@@ -1,6 +1,7 @@
 import { AppException, GLOBAL_ERRORS } from '@@exceptions';
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { isDefined } from 'class-validator';
 import { Request } from 'express';
 import { RedisService } from '../redis';
 
@@ -17,11 +18,17 @@ export class JwtGuard implements CanActivate {
     private readonly redisService: RedisService,
   ) {}
 
+  /**
+   * JWT 토큰을 검증하고 사용자 정보를 요청 객체에 주입
+   *
+   * @param {ExecutionContext} context 실행 컨텍스트
+   * @returns {Promise<boolean>} 인증 성공 시 true
+   */
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Request & { user: { id: number } }>();
     const token = this.extractToken(request);
 
-    if (!token) {
+    if (!isDefined(token)) {
       throw new AppException(GLOBAL_ERRORS.UNAUTHORIZED);
     }
 
@@ -34,6 +41,7 @@ export class JwtGuard implements CanActivate {
     try {
       const payload = this.jwtService.verify<JwtPayload>(token);
       request.user = { id: payload.sub };
+
       return true;
     } catch {
       throw new AppException(GLOBAL_ERRORS.UNAUTHORIZED);
@@ -49,7 +57,7 @@ export class JwtGuard implements CanActivate {
   private extractToken(request: Request): string | undefined {
     const authorization = request.headers.authorization;
 
-    if (!authorization) {
+    if (!isDefined(authorization)) {
       return undefined;
     }
 

@@ -13,10 +13,13 @@ export class CreateShipmentUseCase {
 
   constructor(private readonly commandBus: TypedCommandBus<CreateShipmentCommand>) {}
 
-  async execute(props: {
-    senderId: number;
-    bodyDto: CreateShipmentRequestBodyDto;
-  }): Promise<CreateShipmentResponseDataDto> {
+  /**
+   * 송장 생성 UseCase 진입점
+   *
+   * @param {CreateShipmentUseCaseProps} props 실행 파라미터
+   * @returns {Promise<CreateShipmentResponseDataDto>} 생성된 송장 응답 DTO
+   */
+  async execute(props: CreateShipmentUseCaseProps): Promise<CreateShipmentResponseDataDto> {
     const { senderId, bodyDto } = props;
 
     const shipment = await this.commandBus.execute(
@@ -40,4 +43,9 @@ export class CreateShipmentUseCase {
       status: shipment.status,
     });
   }
+}
+
+interface CreateShipmentUseCaseProps {
+  senderId: number;
+  bodyDto: CreateShipmentRequestBodyDto;
 }

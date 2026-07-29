@@ -2,13 +2,9 @@ import { PrismaService } from '@@db';
 import { AppException } from '@@exceptions';
 import { DriverStatus } from '@@prisma';
 import { Command, CommandHandler, ICommandHandler } from '@nestjs/cqrs';
+import { isDefined } from 'class-validator';
 
 import { DRIVER_ERRORS } from '../../driver.error';
-
-interface UpdateDriverStatusResult {
-  id: number;
-  status: DriverStatus;
-}
 
 /**
  * BUSY 상태로의 임의 변경은 금지 — BUSY 는 배차 배정 시에만 부여된다.
@@ -20,7 +16,7 @@ const ALLOWED_TRANSITIONS: Record<DriverStatus, DriverStatus[]> = {
 };
 
 export class UpdateDriverStatusCommand extends Command<UpdateDriverStatusResult> {
-  constructor(public readonly props: { driverId: number; status: DriverStatus }) {
+  constructor(public readonly props: UpdateDriverStatusCommandProps) {
     super();
   }
 }
@@ -31,11 +27,20 @@ export class UpdateDriverStatusCommandHandler
 {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * 기사 상태 변경. 허용되지 않은 전이 시 예외 발생
+   *
+   * @param {UpdateDriverStatusCommand} command 커맨드 인스턴스
+   * @returns {Promise<UpdateDriverStatusResult>} 변경된 기사 요약
+   */
   async execute(command: UpdateDriverStatusCommand): Promise<UpdateDriverStatusResult> {
     const { driverId, status } = command.props;
 
     const driver = await this.prisma.driver.findUnique({ where: { id: driverId }, select: { status: true } });
-    if (!driver) throw new AppException(DRIVER_ERRORS.NOT_FOUND);
+
+    if (!isDefined(driver)) {
+      throw new AppException(DRIVER_ERRORS.NOT_FOUND);
+    }
 
     if (!ALLOWED_TRANSITIONS[driver.status].includes(status)) {
       throw new AppException(DRIVER_ERRORS.INVALID_STATUS_CHANGE);
@@ -47,4 +52,14 @@ export class UpdateDriverStatusCommandHandler
       select: { id: true, status: true },
     });
   }
+}
+
+interface UpdateDriverStatusResult {
+  id: number;
+  status: DriverStatus;
+}
+
+interface UpdateDriverStatusCommandProps {
+  driverId: number;
+  status: DriverStatus;
 }

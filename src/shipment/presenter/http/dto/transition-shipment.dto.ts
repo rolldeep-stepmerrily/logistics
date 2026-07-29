@@ -97,6 +97,12 @@ export class TransitionShipmentResponseDataDto {
   @ApiProperty({ type: String, description: '전이 후 payment 상태' })
   readonly currentPaymentStatus!: string;
 
+  /**
+   * 전이 결과로부터 응답 DTO 생성
+   *
+   * @param {TransitionShipmentResponseDataDto} data 원본 데이터
+   * @returns {TransitionShipmentResponseDataDto} 매핑된 응답 DTO
+   */
   static from(data: TransitionShipmentResponseDataDto): TransitionShipmentResponseDataDto {
     return {
       id: data.id,

@@ -46,4 +46,14 @@ export class CreateWarehouseResponseDataDto {
 
   @ApiProperty({ type: String })
   readonly code!: string;
+
+  /**
+   * 생성된 창고 요약으로부터 응답 DTO 생성
+   *
+   * @param {CreateWarehouseResponseDataDto} data 원본 데이터
+   * @returns {CreateWarehouseResponseDataDto} 매핑된 응답 DTO
+   */
+  static from(data: CreateWarehouseResponseDataDto): CreateWarehouseResponseDataDto {
+    return { id: data.id, code: data.code };
+  }
 }

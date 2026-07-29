@@ -2,19 +2,12 @@ import { PrismaService } from '@@db';
 import { AppException } from '@@exceptions';
 import { RoutingService, runRoutePlanning } from '@@state-machines';
 import { Command, CommandHandler, ICommandHandler } from '@nestjs/cqrs';
+import { isDefined } from 'class-validator';
 
 import { SHIPMENT_ERRORS } from '../../shipment.error';
 
-interface PlanRouteResult {
-  shipmentId: number;
-  hops: string[];
-  totalHops: number;
-  etaMinutes: number | null;
-  source: 'manual' | 'auto';
-}
-
 export class PlanRouteCommand extends Command<PlanRouteResult> {
-  constructor(public readonly props: { shipmentId: number; hops?: string[] }) {
+  constructor(public readonly props: PlanRouteCommandProps) {
     super();
   }
 }
@@ -28,7 +21,10 @@ export class PlanRouteCommandHandler implements ICommandHandler<PlanRouteCommand
 
   /**
    * hops 가 주어지면 그대로 저장 (manual). 없으면 routePlanningMachine 을 통해 routing service 를 invoke 하고
-   * 성공 시 반환된 hops 로 route plan 을 upsert (auto).
+   * 성공 시 반환된 hops 로 route plan 을 upsert (auto)
+   *
+   * @param {PlanRouteCommand} command 라우팅 계획 커맨드
+   * @returns {Promise<PlanRouteResult>} 저장된 라우팅 계획 요약
    */
   async execute(command: PlanRouteCommand): Promise<PlanRouteResult> {
     const { shipmentId } = command.props;
@@ -42,39 +38,74 @@ export class PlanRouteCommandHandler implements ICommandHandler<PlanRouteCommand
         destinationHub: { select: { code: true } },
       },
     });
-    if (!shipment) throw new AppException(SHIPMENT_ERRORS.NOT_FOUND);
+
+    if (!isDefined(shipment)) {
+      throw new AppException(SHIPMENT_ERRORS.NOT_FOUND);
+    }
+
     if (shipment.originHubId === shipment.destinationHubId) {
       throw new AppException(SHIPMENT_ERRORS.ORIGIN_EQUALS_DESTINATION);
     }
 
-    let hops: string[];
-    let etaMinutes: number | null = null;
-    let source: 'manual' | 'auto';
-
-    if (command.props.hops && command.props.hops.length >= 2) {
-      hops = command.props.hops;
-      source = 'manual';
-    } else {
-      const planning = await runRoutePlanning(this.routingService, {
-        originCode: shipment.originHub.code,
-        destinationCode: shipment.destinationHub.code,
-      });
-
-      if (planning.status !== 'planned') {
-        throw new AppException(SHIPMENT_ERRORS.ROUTING_FAILED);
-      }
-
-      hops = planning.hops;
-      etaMinutes = planning.etaMinutes;
-      source = 'auto';
-    }
+    const plan = await this.resolveRoutePlan(command.props.hops, shipment.originHub.code, shipment.destinationHub.code);
 
     await this.prisma.routePlan.upsert({
       where: { shipmentId },
-      create: { shipmentId, hops, currentHopIndex: 0 },
-      update: { hops, currentHopIndex: 0 },
+      create: { shipmentId, hops: plan.hops, currentHopIndex: 0 },
+      update: { hops: plan.hops, currentHopIndex: 0 },
     });
 
-    return { shipmentId, hops, totalHops: hops.length, etaMinutes, source };
+    return {
+      shipmentId,
+      hops: plan.hops,
+      totalHops: plan.hops.length,
+      etaMinutes: plan.etaMinutes,
+      source: plan.source,
+    };
   }
+
+  /**
+   * manual hops 가 유효하면 그대로, 아니면 routing service 로 자동 계획 조회
+   *
+   * @param {string[]} [manualHops] 수동 지정된 hop 배열
+   * @param {string} originCode 출발 허브 코드
+   * @param {string} destinationCode 도착 허브 코드
+   * @returns {Promise<ResolvedRoutePlan>} 결정된 hops / eta / source
+   */
+  private async resolveRoutePlan(
+    manualHops: string[] | undefined,
+    originCode: string,
+    destinationCode: string,
+  ): Promise<ResolvedRoutePlan> {
+    if (isDefined(manualHops) && manualHops.length >= 2) {
+      return { hops: manualHops, etaMinutes: null, source: 'manual' };
+    }
+
+    const planning = await runRoutePlanning(this.routingService, { originCode, destinationCode });
+
+    if (planning.status !== 'planned') {
+      throw new AppException(SHIPMENT_ERRORS.ROUTING_FAILED);
+    }
+
+    return { hops: planning.hops, etaMinutes: planning.etaMinutes, source: 'auto' };
+  }
+}
+
+interface PlanRouteResult {
+  shipmentId: number;
+  hops: string[];
+  totalHops: number;
+  etaMinutes: number | null;
+  source: 'manual' | 'auto';
+}
+
+interface PlanRouteCommandProps {
+  shipmentId: number;
+  hops?: string[];
+}
+
+interface ResolvedRoutePlan {
+  hops: string[];
+  etaMinutes: number | null;
+  source: 'manual' | 'auto';
 }

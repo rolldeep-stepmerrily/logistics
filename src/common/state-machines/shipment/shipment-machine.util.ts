@@ -32,9 +32,11 @@ export interface ITransitionResult {
 }
 
 /**
- * DB 컬럼 (status, deliveryPhase) 을 XState value shape 으로 재조립.
+ * DB 컬럼 (status, deliveryPhase) 을 XState value shape 으로 재조립. OUT_FOR_DELIVERY 만 compound state
  *
- * OUT_FOR_DELIVERY 만 compound state 라 object shape 이 되고, 나머지는 flat string.
+ * @param {ShipmentDeliveryState} delivery DB 의 status 컬럼 값
+ * @param {ShipmentDeliveryPhase | null} phase DB 의 deliveryPhase 컬럼 값
+ * @returns {ShipmentDeliveryValue} XState machine 의 delivery value
  */
 const buildDeliveryValue = (
   delivery: ShipmentDeliveryState,
@@ -43,11 +45,15 @@ const buildDeliveryValue = (
   if (delivery === 'OUT_FOR_DELIVERY') {
     return { OUT_FOR_DELIVERY: phase ?? 'EN_ROUTE' };
   }
+
   return delivery;
 };
 
 /**
- * snapshot value 에서 (delivery, phase) 를 분리 추출.
+ * snapshot value 에서 (delivery, phase) 를 분리 추출
+ *
+ * @param {ShipmentDeliveryValue} value XState delivery value
+ * @returns {{ delivery: ShipmentDeliveryState; phase: ShipmentDeliveryPhase | null }} 분리된 상태 조합
  */
 const parseDeliveryValue = (
   value: ShipmentDeliveryValue,
@@ -55,35 +61,43 @@ const parseDeliveryValue = (
   if (typeof value === 'string') {
     return { delivery: value, phase: null };
   }
+
   return { delivery: 'OUT_FOR_DELIVERY', phase: value.OUT_FOR_DELIVERY };
 };
 
 /**
- * Parallel + compound machine 의 저장된 상태로부터 snapshot 을 복원한다.
+ * Parallel + compound machine 의 저장된 상태로부터 snapshot 을 복원
+ *
+ * @param {ShipmentDeliveryState} currentDelivery 현재 delivery 상태
+ * @param {ShipmentPaymentState} currentPayment 현재 payment 상태
+ * @param {ShipmentDeliveryPhase | null} currentDeliveryPhase 현재 delivery phase
+ * @param {ShipmentMachineContext} context 머신 컨텍스트
+ * @returns {ReturnType<typeof shipmentMachine.resolveState>} 복원된 snapshot
  */
 export const resolveShipmentSnapshot = (
   currentDelivery: ShipmentDeliveryState,
   currentPayment: ShipmentPaymentState,
   currentDeliveryPhase: ShipmentDeliveryPhase | null,
   context: ShipmentMachineContext,
-) => {
+): ReturnType<typeof shipmentMachine.resolveState> => {
   const actor = createActor(shipmentMachine, { input: context });
   actor.start();
+
   return shipmentMachine.resolveState({
     value: {
       delivery: buildDeliveryValue(currentDelivery, currentDeliveryPhase),
       payment: currentPayment,
     },
     context,
-    // biome-ignore lint/suspicious/noExplicitAny: XState 5의 resolveState 타입이 union으로 좁혀지지 않아 명시적 우회
+    // biome-ignore lint/suspicious/noExplicitAny: XState 5 의 resolveState 타입이 parallel value 유니온으로 좁혀지지 않아 명시적 우회
   } as any);
 };
 
 /**
- * 현재 상태 + 이벤트를 받아 다음 상태를 계산한다.
+ * 현재 상태 + 이벤트를 받아 다음 상태를 계산. 세 축 (delivery / payment / phase) 중 어느 하나라도 바뀌면 changed=true
  *
- * Parallel machine (delivery / payment) 이고, delivery 는 compound (OUT_FOR_DELIVERY 하위에 EN_ROUTE / AT_DOOR).
- * 세 축 (delivery / payment / phase) 중 어느 하나라도 바뀌면 changed=true.
+ * @param {ITransitionInput} input 전이 입력값
+ * @returns {ITransitionResult} 전이 결과
  */
 export const runTransition = ({
   currentDelivery,

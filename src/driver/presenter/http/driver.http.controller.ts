@@ -31,6 +31,12 @@ export class DriverHttpController {
     private readonly updateDriverStatusUseCase: UpdateDriverStatusUseCase,
   ) {}
 
+  /**
+   * 기사 신규 등록
+   *
+   * @param {CreateDriverRequestBodyDto} bodyDto 기사 등록 요청 데이터
+   * @returns {Promise<CreateDriverResponseDataDto>} 등록된 기사 정보
+   */
   @ApiOperation({ summary: '기사 등록' })
   @ApiBearerAuth('accessToken')
   @ApiBody({ type: CreateDriverRequestBodyDto })
@@ -41,12 +47,25 @@ export class DriverHttpController {
     return await this.createDriverUseCase.execute({ bodyDto });
   }
 
+  /**
+   * status / warehouse 필터로 기사 목록 조회
+   *
+   * @param {GetDriversRequestQueryDto} queryDto 필터 쿼리
+   * @returns {Promise<GetDriversResponseDataDto>} 기사 목록
+   */
   @ApiOperation({ summary: '기사 목록 조회 (status/warehouse 필터)' })
   @Get(DriverRouter.Http.GetList)
   async getDrivers(@Query() queryDto: GetDriversRequestQueryDto): Promise<GetDriversResponseDataDto> {
     return await this.getDriversUseCase.execute({ queryDto });
   }
 
+  /**
+   * 기사 상태 수동 변경 (OFFLINE ↔ AVAILABLE)
+   *
+   * @param {number} id 대상 기사 ID
+   * @param {UpdateDriverStatusRequestBodyDto} bodyDto 변경할 상태 데이터
+   * @returns {Promise<UpdateDriverStatusResponseDataDto>} 변경된 기사 상태
+   */
   @ApiOperation({
     summary: '기사 상태 수동 변경 (OFFLINE ↔ AVAILABLE). BUSY는 배차 시스템만 부여.',
   })

@@ -31,4 +31,9 @@ export const GLOBAL_ERRORS = {
     errorCode: 'TOKEN_BLACKLISTED',
     message: 'Token has been revoked',
   },
+  REDIS_PIPELINE_NO_RESULTS: {
+    statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+    errorCode: 'REDIS_PIPELINE_NO_RESULTS',
+    message: 'Redis pipeline returned no results',
+  },
 } as const;

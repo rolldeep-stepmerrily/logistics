@@ -25,6 +25,12 @@ export interface IRoutingResponse {
 export class RoutingService {
   private readonly logger = new Logger(RoutingService.name);
 
+  /**
+   * 외부 라우팅 API 호출을 흉내내어 hop 배열과 예상 시간 반환. 학습용 stub
+   *
+   * @param {IRoutingRequest} req origin / destination code
+   * @returns {Promise<IRoutingResponse>} hops + etaMinutes
+   */
   async suggestRoute(req: IRoutingRequest): Promise<IRoutingResponse> {
     this.logger.log(`Routing request: ${req.originCode} → ${req.destinationCode}`);
     await new Promise((resolve) => setTimeout(resolve, 300));
@@ -34,6 +40,7 @@ export class RoutingService {
     }
 
     const midHub = this.deriveMidHubCode(req.originCode, req.destinationCode);
+
     return {
       hops: [req.originCode, midHub, req.destinationCode],
       etaMinutes: 180 + Math.floor(Math.random() * 60),
@@ -41,12 +48,16 @@ export class RoutingService {
   }
 
   /**
-   * 결정론적으로 origin/destination 사이의 가상 mid-hub code 를 만든다.
-   * 학습용이라 실제 지리 정보는 무시.
+   * 결정론적으로 origin / destination 사이의 가상 mid-hub code 생성. 학습용이라 실제 지리 정보는 무시
+   *
+   * @param {string} origin 출발 코드
+   * @param {string} destination 도착 코드
+   * @returns {string} mid-hub 코드
    */
   private deriveMidHubCode(origin: string, destination: string): string {
     const prefix = origin.slice(0, 2);
     const suffix = destination.slice(0, 2);
+
     return `${prefix}${suffix}00`;
   }
 }

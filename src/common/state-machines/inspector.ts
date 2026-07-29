@@ -14,7 +14,10 @@ let initialized = false;
  * NODE_ENV 는 process.env 에서 직접 읽는다 (ConfigService 주입 없이 pure util 유지).
  */
 export const getShipmentInspector = (): typeof cachedInspect => {
-  if (initialized) return cachedInspect;
+  if (initialized) {
+    return cachedInspect;
+  }
+
   initialized = true;
 
   const nodeEnv = process.env.NODE_ENV ?? 'development';

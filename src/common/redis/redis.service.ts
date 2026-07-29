@@ -1,3 +1,4 @@
+import { AppException, GLOBAL_ERRORS } from '@@exceptions';
 import { createHash } from 'node:crypto';
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -44,6 +45,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /**
+   * 모듈 종료 시 Redis 연결을 닫음
+   */
   async onModuleDestroy(): Promise<void> {
     await this.client.quit();
   }
@@ -157,7 +161,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     const results = await pipeline.exec();
 
     if (!isDefined(results)) {
-      throw new Error('Redis pipeline returned no results');
+      throw new AppException(GLOBAL_ERRORS.REDIS_PIPELINE_NO_RESULTS);
     }
 
     for (const [err] of results) {

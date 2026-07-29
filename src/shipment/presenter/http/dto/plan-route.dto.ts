@@ -32,4 +32,20 @@ export class PlanRouteResponseDataDto {
 
   @ApiProperty({ type: String, enum: ['manual', 'auto'], description: 'hops 결정 방식' })
   readonly source!: 'manual' | 'auto';
+
+  /**
+   * 라우팅 계획 결과로부터 응답 DTO 생성
+   *
+   * @param {PlanRouteResponseDataDto} data 원본 데이터
+   * @returns {PlanRouteResponseDataDto} 매핑된 응답 DTO
+   */
+  static from(data: PlanRouteResponseDataDto): PlanRouteResponseDataDto {
+    return {
+      shipmentId: data.shipmentId,
+      hops: data.hops,
+      totalHops: data.totalHops,
+      etaMinutes: data.etaMinutes,
+      source: data.source,
+    };
+  }
 }

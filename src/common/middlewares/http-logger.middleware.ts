@@ -1,5 +1,6 @@
 import { Injectable, Logger, NestMiddleware } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { isDefined } from 'class-validator';
 
 import { NextFunction, Request, Response } from 'express';
 
@@ -13,21 +14,27 @@ export class HttpLoggerMiddleware implements NestMiddleware {
 
   private readonly logger = new Logger('HTTP');
 
+  /**
+   * 모든 HTTP 요청에 대해 완료 시 접근 로그를 출력
+   *
+   * @param {IRequest} req Express 요청 객체
+   * @param {Response} res Express 응답 객체
+   * @param {NextFunction} next 다음 미들웨어 함수
+   */
   use(req: IRequest, res: Response, next: NextFunction): void {
     const startTime = Date.now();
 
     if (['local', 'development'].includes(this.configService.getOrThrow('NODE_ENV'))) {
-      // biome-ignore lint/suspicious/noConsole: 개발 환경에서 요청 바디 로깅
-      console.log(req.body);
+      this.logger.debug(`Body: ${JSON.stringify(req.body)}`);
     }
 
     res.on('finish', () => {
-      const userIpV4 = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+      const userIpV4 = req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? 'unknown';
       const userIpV6 = req.ips.length > 0 ? req.ips[0] : (req.ip ?? 'unknown');
-      const userId = req.user?.id ? ` ${req.user?.id} ` : ' ';
-      const contentLength = res.getHeader('content-length') || 0;
-      const referrer = req.header('Referer') || req.header('Referrer');
-      const formattedReferrer = referrer ? ` "${referrer}" ` : ' ';
+      const userId = isDefined(req.user?.id) ? ` ${req.user.id} ` : ' ';
+      const contentLength = res.getHeader('content-length') ?? 0;
+      const referrer = req.header('Referer') ?? req.header('Referrer');
+      const formattedReferrer = isDefined(referrer) ? ` "${referrer}" ` : ' ';
       const userAgent = req.header('user-agent');
       const responseTime = Date.now() - startTime;
 
@@ -35,9 +42,11 @@ export class HttpLoggerMiddleware implements NestMiddleware {
 
       if (res.statusCode >= 400) {
         this.logger.error(message);
-      } else {
-        this.logger.log(message);
+
+        return;
       }
+
+      this.logger.log(message);
     });
 
     next();

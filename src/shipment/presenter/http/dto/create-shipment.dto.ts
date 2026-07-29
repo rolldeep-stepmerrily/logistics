@@ -49,6 +49,12 @@ export class CreateShipmentResponseDataDto {
   @ApiProperty({ type: String, description: '현재 상태 (초기 = CREATED)' })
   readonly status!: string;
 
+  /**
+   * 생성된 송장 요약으로부터 응답 DTO 생성
+   *
+   * @param {CreateShipmentResponseDataDto} data 원본 데이터
+   * @returns {CreateShipmentResponseDataDto} 매핑된 응답 DTO
+   */
   static from(data: CreateShipmentResponseDataDto): CreateShipmentResponseDataDto {
     return { id: data.id, trackingNumber: data.trackingNumber, status: data.status };
   }

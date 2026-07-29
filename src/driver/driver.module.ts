@@ -12,12 +12,19 @@ import { DriverHttpController } from './presenter/http/driver.http.controller';
 @Module({
   controllers: [DriverHttpController],
   providers: [
+    /** query-handlers */
     GetDriversQueryHandler,
+
+    /** command-handlers */
     CreateDriverCommandHandler,
     UpdateDriverStatusCommandHandler,
+
+    /** use-cases */
     CreateDriverUseCase,
     GetDriversUseCase,
     UpdateDriverStatusUseCase,
+
+    /** infrastructure */
     JwtGuard,
   ],
 })

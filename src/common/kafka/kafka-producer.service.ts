@@ -26,6 +26,9 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
     this.logger.log('Kafka Producer connected');
   }
 
+  /**
+   * 모듈 종료 시 Kafka Producer 연결 종료
+   */
   async onModuleDestroy(): Promise<void> {
     await this.producer.disconnect();
   }

@@ -68,6 +68,11 @@ import { WarehouseModule } from './warehouse/warehouse.module';
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule implements NestModule {
+  /**
+   * 전역 미들웨어 등록
+   *
+   * @param {MiddlewareConsumer} consumer NestJS 미들웨어 컨슈머
+   */
   configure(consumer: MiddlewareConsumer): void {
     consumer.apply(HttpLoggerMiddleware).forRoutes('{*splat}');
   }
